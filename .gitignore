@@ -1,3 +1,7 @@
 AGENTS.md
 TODO.md
 DONE.md
+config.json
+seen.json
+__pycache__/
+*.py[cod]
