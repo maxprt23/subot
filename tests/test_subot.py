@@ -1,4 +1,6 @@
 import json
+import os
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -71,6 +73,22 @@ class NotificationTests(unittest.TestCase):
         title.encode("ascii")
 
 
+class SeenStateTests(unittest.TestCase):
+    def test_failed_write_preserves_existing_state(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "seen.json")
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(["existing"], f)
+
+            with patch("subot.json.dump", side_effect=OSError("disk full")):
+                with self.assertRaisesRegex(OSError, "disk full"):
+                    subot.save_seen(path, {"replacement"})
+
+            with open(path, encoding="utf-8") as f:
+                self.assertEqual(json.load(f), ["existing"])
+            self.assertEqual(os.listdir(directory), ["seen.json"])
+
+
 class RunOnceTests(unittest.TestCase):
     def setUp(self):
         self.cfg = {
@@ -103,10 +121,43 @@ class RunOnceTests(unittest.TestCase):
         notify.side_effect = [requests.RequestException("unavailable"), None]
         seen = set()
 
+        _, notification_failures = subot.run_once(self.cfg, seen, dry_run=False)
+
+        self.assertEqual(seen, {"2"})
+        self.assertEqual(notify.call_count, 2)
+        self.assertEqual(notification_failures, 1)
+
+    @patch("subot.extract_items")
+    @patch("subot.fetch_page", return_value="html")
+    @patch("subot.notify")
+    def test_listing_is_reconsidered_after_entering_price_range(self, notify, fetch, extract):
+        extract.side_effect = [[raw_item("1", 50)], [raw_item("1", 200)]]
+        seen = set()
+
+        subot.run_once(self.cfg, seen, dry_run=False)
         subot.run_once(self.cfg, seen, dry_run=False)
 
-        self.assertEqual(seen, {"2", "3"})
-        self.assertEqual(notify.call_count, 2)
+        notify.assert_called_once()
+        self.assertEqual(seen, {"1"})
+
+
+class MainTests(unittest.TestCase):
+    @patch("subot.load_config", return_value={"poll_interval": 300})
+    @patch("subot.load_seen", return_value=set())
+    @patch("subot.run_once", side_effect=requests.RequestException("unavailable"))
+    def test_once_returns_failure_when_fetch_fails(self, run_once, load_seen, load_config):
+        with patch("sys.argv", ["subot.py", "--once"]):
+            self.assertEqual(subot.main(), 1)
+
+    @patch("subot.save_seen")
+    @patch("subot.load_config", return_value={"poll_interval": 300})
+    @patch("subot.load_seen", return_value=set())
+    @patch("subot.run_once", return_value=(1, 1))
+    def test_once_returns_failure_when_notification_fails(
+        self, run_once, load_seen, load_config, save_seen
+    ):
+        with patch("sys.argv", ["subot.py", "--once"]):
+            self.assertEqual(subot.main(), 1)
 
 
 if __name__ == "__main__":

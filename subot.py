@@ -5,13 +5,16 @@ import json
 import os
 import re
 import sys
+import tempfile
 import time
 
 import requests
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
-SEEN_PATH = os.path.join(BASE_DIR, "seen.json")
+CONFIG_PATH = os.environ.get(
+    "SUBOT_CONFIG_PATH", os.path.join(BASE_DIR, "config.json")
+)
+SEEN_PATH = os.environ.get("SUBOT_SEEN_PATH", os.path.join(BASE_DIR, "seen.json"))
 
 DEFAULT_UA = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
@@ -32,8 +35,26 @@ def load_seen(path):
 
 
 def save_seen(path, ids):
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(sorted(ids), f, indent=2)
+    directory = os.path.dirname(os.path.abspath(path))
+    basename = os.path.basename(path)
+    fd, temporary_path = tempfile.mkstemp(
+        dir=directory,
+        prefix=f".{basename}.",
+        text=True,
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(sorted(ids), f, indent=2)
+            f.write("\n")
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temporary_path, path)
+    except BaseException:
+        try:
+            os.unlink(temporary_path)
+        except FileNotFoundError:
+            pass
+        raise
 
 
 def fetch_page(url, user_agent):
@@ -162,6 +183,7 @@ def run_once(cfg, seen, dry_run):
     html = fetch_page(cfg["search_url"], cfg.get("user_agent") or DEFAULT_UA)
     items = extract_items(html)
     print(f"fetched {len(items)} listings")
+    notification_failures = 0
 
     for raw in items:
         it = parse_item(raw)
@@ -170,8 +192,6 @@ def run_once(cfg, seen, dry_run):
         if it["id"] in seen:
             continue
         if not matches_price(it["price"], cfg.get("min_price"), cfg.get("max_price")):
-            if not dry_run:
-                seen.add(it["id"])
             continue
 
         print(f"  MATCH  {fmt_price(it['price'])} \u20ac  {it['subject']}  {it['url']}")
@@ -182,11 +202,12 @@ def run_once(cfg, seen, dry_run):
             notify(cfg, it)
         except requests.RequestException as e:
             print(f"  -> notification failed for {it['id']}: {e}", file=sys.stderr)
+            notification_failures += 1
             continue
 
         seen.add(it["id"])
         print(f"  -> notified {it['id']}")
-    return len(items)
+    return len(items), notification_failures
 
 
 def main():
@@ -200,19 +221,24 @@ def main():
     interval = int(cfg.get("poll_interval", 300))
 
     while True:
+        notification_failures = 0
         try:
-            run_once(cfg, seen, dry_run=args.dry_run)
+            _, notification_failures = run_once(cfg, seen, dry_run=args.dry_run)
             if not args.dry_run:
                 save_seen(SEEN_PATH, seen)
         except requests.RequestException as e:
             print(f"error: {e}", file=sys.stderr)
+            if args.once:
+                return 1
         except (ValueError, KeyError, json.JSONDecodeError) as e:
             print(f"parse error: {e}", file=sys.stderr)
+            if args.once:
+                return 1
 
         if args.once:
-            break
+            return 1 if notification_failures else 0
         time.sleep(interval)
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
