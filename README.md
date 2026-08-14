@@ -20,7 +20,7 @@ Create a virtual environment and install the dependencies:
 ```bash
 python3 -m venv .venv
 . .venv/bin/activate
-pip install -r requirements.txt
+pip install .
 ```
 
 Test the configuration without sending notifications:
