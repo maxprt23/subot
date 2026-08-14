@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-import requests
+from curl_cffi.requests.exceptions import RequestException
 
 import subot
 
@@ -118,7 +118,7 @@ class RunOnceTests(unittest.TestCase):
             raw_item("2", 250),
             raw_item("3", 50),
         ]
-        notify.side_effect = [requests.RequestException("unavailable"), None]
+        notify.side_effect = [RequestException("unavailable"), None]
         seen = set()
 
         _, notification_failures = subot.run_once(self.cfg, seen, dry_run=False)
@@ -164,7 +164,7 @@ class NextSleepTests(unittest.TestCase):
 class MainTests(unittest.TestCase):
     @patch("subot.load_config", return_value={"poll_interval": 300})
     @patch("subot.load_seen", return_value=set())
-    @patch("subot.run_once", side_effect=requests.RequestException("unavailable"))
+    @patch("subot.run_once", side_effect=RequestException("unavailable"))
     def test_once_returns_failure_when_fetch_fails(self, run_once, load_seen, load_config):
         with patch("sys.argv", ["subot.py", "--once"]):
             self.assertEqual(subot.main(), 1)

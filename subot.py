@@ -9,16 +9,12 @@ import sys
 import tempfile
 import time
 
-import requests
+from curl_cffi import requests
+from curl_cffi.requests.exceptions import RequestException
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
 SEEN_PATH = os.path.join(BASE_DIR, "seen.json")
-
-DEFAULT_UA = (
-    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-)
 
 
 def load_config(path):
@@ -56,13 +52,11 @@ def save_seen(path, ids):
         raise
 
 
-def fetch_page(url, user_agent):
+def fetch_page(url):
     headers = {
-        "User-Agent": user_agent,
         "Accept-Language": "it-IT,it;q=0.9,en;q=0.8",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     }
-    r = requests.get(url, headers=headers, timeout=30)
+    r = requests.get(url, headers=headers, timeout=30, impersonate="chrome")
     r.raise_for_status()
     return r.text
 
@@ -188,7 +182,7 @@ def notify(cfg, item):
 
 
 def run_once(cfg, seen, dry_run):
-    html = fetch_page(cfg["search_url"], cfg.get("user_agent") or DEFAULT_UA)
+    html = fetch_page(cfg["search_url"])
     items = extract_items(html)
     print(f"fetched {len(items)} listings")
     notification_failures = 0
@@ -208,7 +202,7 @@ def run_once(cfg, seen, dry_run):
 
         try:
             notify(cfg, it)
-        except requests.RequestException as e:
+        except RequestException as e:
             print(f"  -> notification failed for {it['id']}: {e}", file=sys.stderr)
             notification_failures += 1
             continue
@@ -233,7 +227,7 @@ def main():
             _, notification_failures = run_once(cfg, seen, dry_run=args.dry_run)
             if not args.dry_run:
                 save_seen(SEEN_PATH, seen)
-        except requests.RequestException as e:
+        except RequestException as e:
             print(f"error: {e}", file=sys.stderr)
             if args.once:
                 return 1
