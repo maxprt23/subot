@@ -11,6 +11,10 @@ cp config.example.json config.json
 chmod 600 config.json
 ```
 
+Use Subito's result URL as `search_url`. Filters such as location and category
+are encoded in its path; price and shipping filters appear in its query string,
+for example `?ps=100&pe=500&shp=true`.
+
 Create a virtual environment and install the dependencies:
 
 ```bash

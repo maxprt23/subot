@@ -107,8 +107,6 @@ class LoggingTests(unittest.TestCase):
             "ntfy_server": "https://server-secret@ntfy.example/private-base",
             "ntfy_topic": "private-topic",
             "ntfy_token": "private-token",
-            "min_price": 100,
-            "max_price": 500,
             "poll_interval_min": 60,
             "poll_interval_max": 120,
         }
@@ -132,8 +130,6 @@ class LoggingTests(unittest.TestCase):
         )
         cfg = {
             "search_url": "https://example.test/search",
-            "min_price": 100,
-            "max_price": 500,
         }
 
         with self.assertLogs("subot", level="ERROR") as logs:
@@ -165,8 +161,6 @@ class RunOnceTests(unittest.TestCase):
     def setUp(self):
         self.cfg = {
             "search_url": "https://example.test/search",
-            "min_price": 100,
-            "max_price": 500,
         }
 
     @patch("subot.extract_items")
@@ -190,7 +184,7 @@ class RunOnceTests(unittest.TestCase):
         extract.return_value = [
             raw_item("1", 200),
             raw_item("2", 250),
-            raw_item("3", 50),
+            raw_item("3", None),
         ]
         notify.side_effect = [RequestException("unavailable"), None]
         seen = set()
@@ -204,23 +198,6 @@ class RunOnceTests(unittest.TestCase):
         self.assertEqual(stats.matched, 2)
         self.assertEqual(stats.notified, 1)
         self.assertEqual(stats.failures, 1)
-
-    @patch("subot.extract_items")
-    @patch("subot.fetch_page", return_value="html")
-    @patch("subot.notify")
-    def test_listing_is_reconsidered_after_entering_price_range(self, notify, fetch, extract):
-        extract.side_effect = [[raw_item("1", 50)], [raw_item("1", 200)]]
-        seen = set()
-
-        subot.run_once(
-            self.cfg, seen, dry_run=False, stats=subot.CycleStats()
-        )
-        subot.run_once(
-            self.cfg, seen, dry_run=False, stats=subot.CycleStats()
-        )
-
-        notify.assert_called_once()
-        self.assertEqual(seen, {"1"})
 
 
 class NextSleepTests(unittest.TestCase):
