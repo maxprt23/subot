@@ -47,6 +47,13 @@ systemctl --user daemon-reload
 systemctl --user enable --now subot.service
 ```
 
+Keep the service running after logout. Enabling lingering normally requires
+administrator privileges:
+
+```bash
+sudo loginctl enable-linger "$USER"
+```
+
 Check its status:
 
 ```bash
