@@ -137,7 +137,7 @@ class LoggingTests(unittest.TestCase):
         }
 
         with self.assertLogs("subot", level="ERROR") as logs:
-            subot.run_once(cfg, set(), dry_run=False)
+            subot.run_once(cfg, set(), dry_run=False, stats=subot.CycleStats())
 
         output = "\n".join(logs.output)
         self.assertIn("error_type=RequestException", output)
@@ -176,7 +176,9 @@ class RunOnceTests(unittest.TestCase):
         extract.return_value = [raw_item("1", 200), raw_item("2", 50)]
         seen = set()
 
-        subot.run_once(self.cfg, seen, dry_run=True)
+        subot.run_once(
+            self.cfg, seen, dry_run=True, stats=subot.CycleStats()
+        )
 
         self.assertEqual(seen, set())
         notify.assert_not_called()
@@ -193,7 +195,8 @@ class RunOnceTests(unittest.TestCase):
         notify.side_effect = [RequestException("unavailable"), None]
         seen = set()
 
-        stats = subot.run_once(self.cfg, seen, dry_run=False)
+        stats = subot.CycleStats()
+        subot.run_once(self.cfg, seen, dry_run=False, stats=stats)
 
         self.assertEqual(seen, {"2"})
         self.assertEqual(notify.call_count, 2)
@@ -209,8 +212,12 @@ class RunOnceTests(unittest.TestCase):
         extract.side_effect = [[raw_item("1", 50)], [raw_item("1", 200)]]
         seen = set()
 
-        subot.run_once(self.cfg, seen, dry_run=False)
-        subot.run_once(self.cfg, seen, dry_run=False)
+        subot.run_once(
+            self.cfg, seen, dry_run=False, stats=subot.CycleStats()
+        )
+        subot.run_once(
+            self.cfg, seen, dry_run=False, stats=subot.CycleStats()
+        )
 
         notify.assert_called_once()
         self.assertEqual(seen, {"1"})
@@ -222,29 +229,32 @@ class NextSleepTests(unittest.TestCase):
         for _ in range(100):
             self.assertIn(subot.next_sleep(cfg), range(5, 11))
 
-    def test_falls_back_to_poll_interval(self):
-        cfg = {"poll_interval": 300}
-        for _ in range(100):
-            self.assertEqual(subot.next_sleep(cfg), 300)
-
-    def test_swaps_inverted_bounds(self):
+    def test_rejects_inverted_bounds(self):
         cfg = {"poll_interval_min": 10, "poll_interval_max": 5}
-        for _ in range(100):
-            self.assertIn(subot.next_sleep(cfg), range(5, 11))
+        with self.assertRaisesRegex(ValueError, "must not exceed"):
+            subot.next_sleep(cfg)
 
-    def test_defaults_to_300(self):
-        self.assertEqual(subot.next_sleep({}), 300)
+    def test_rejects_non_positive_bounds(self):
+        cfg = {"poll_interval_min": 0, "poll_interval_max": 5}
+        with self.assertRaisesRegex(ValueError, "must be positive"):
+            subot.next_sleep(cfg)
 
 
 class MainTests(unittest.TestCase):
-    @patch("subot.load_config", return_value={"poll_interval": 300})
+    @patch(
+        "subot.load_config",
+        return_value={"poll_interval_min": 300, "poll_interval_max": 300},
+    )
     @patch("subot.load_seen", return_value=set())
     @patch("subot.run_once", side_effect=RequestException("unavailable"))
     def test_once_returns_failure_when_fetch_fails(self, run_once, load_seen, load_config):
         with patch("sys.argv", ["subot.py", "--once"]):
             self.assertEqual(subot.main(), 1)
 
-    @patch("subot.load_config", return_value={"poll_interval": 300})
+    @patch(
+        "subot.load_config",
+        return_value={"poll_interval_min": 300, "poll_interval_max": 300},
+    )
     @patch("subot.load_seen", return_value=set())
     @patch("subot.save_seen")
     def test_summary_preserves_counts_when_cycle_fails(
@@ -265,12 +275,20 @@ class MainTests(unittest.TestCase):
         self.assertIn("fetched=4 matched=2 notified=0 failures=1", summaries[0])
 
     @patch("subot.save_seen")
-    @patch("subot.load_config", return_value={"poll_interval": 300})
+    @patch(
+        "subot.load_config",
+        return_value={"poll_interval_min": 300, "poll_interval_max": 300},
+    )
     @patch("subot.load_seen", return_value=set())
-    @patch("subot.run_once", return_value=subot.CycleStats(fetched=1, failures=1))
+    @patch("subot.run_once")
     def test_once_returns_failure_when_notification_fails(
         self, run_once, load_seen, load_config, save_seen
     ):
+        def fail_notification(cfg, seen, dry_run, stats):
+            stats.fetched = 1
+            stats.failures = 1
+
+        run_once.side_effect = fail_notification
         with self.assertLogs("subot", level="INFO") as logs:
             with patch("sys.argv", ["subot.py", "--once"]):
                 self.assertEqual(subot.main(), 1)
