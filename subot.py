@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 import argparse
+from dataclasses import dataclass
 from email.header import Header
 import json
+import logging
 import os
 import random
 import re
 import sys
 import tempfile
 import time
+from urllib.parse import urlsplit
 
 from curl_cffi import requests
 from curl_cffi.requests.exceptions import RequestException
@@ -15,6 +18,53 @@ from curl_cffi.requests.exceptions import RequestException
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
 SEEN_PATH = os.path.join(BASE_DIR, "seen.json")
+LOGGER = logging.getLogger("subot")
+
+
+@dataclass
+class CycleStats:
+    fetched: int = 0
+    matched: int = 0
+    notified: int = 0
+    failures: int = 0
+
+
+def configure_logging():
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+        datefmt="%Y-%m-%dT%H:%M:%S%z",
+    )
+
+
+def url_origin(value):
+    try:
+        parsed = urlsplit(value)
+    except ValueError:
+        return "invalid"
+    if not parsed.scheme or not parsed.hostname:
+        return "invalid"
+    host = f"[{parsed.hostname}]" if ":" in parsed.hostname else parsed.hostname
+    try:
+        port = f":{parsed.port}" if parsed.port is not None else ""
+    except ValueError:
+        return "invalid"
+    return f"{parsed.scheme}://{host}{port}"
+
+
+def log_startup_config(cfg, dry_run, once):
+    LOGGER.info(
+        "startup search_origin=%s ntfy_origin=%s min_price=%s max_price=%s "
+        "poll_interval_min=%s poll_interval_max=%s dry_run=%s once=%s",
+        url_origin(cfg.get("search_url", "")),
+        url_origin(cfg.get("ntfy_server", "")),
+        cfg.get("min_price"),
+        cfg.get("max_price"),
+        cfg.get("poll_interval_min", cfg.get("poll_interval", 300)),
+        cfg.get("poll_interval_max", cfg.get("poll_interval", 300)),
+        dry_run,
+        once,
+    )
 
 
 def load_config(path):
@@ -181,11 +231,12 @@ def notify(cfg, item):
     r.raise_for_status()
 
 
-def run_once(cfg, seen, dry_run):
+def run_once(cfg, seen, dry_run, stats=None):
+    if stats is None:
+        stats = CycleStats()
     html = fetch_page(cfg["search_url"])
     items = extract_items(html)
-    print(f"fetched {len(items)} listings")
-    notification_failures = 0
+    stats.fetched = len(items)
 
     for raw in items:
         it = parse_item(raw)
@@ -196,23 +247,36 @@ def run_once(cfg, seen, dry_run):
         if not matches_price(it["price"], cfg.get("min_price"), cfg.get("max_price")):
             continue
 
-        print(f"  MATCH  {fmt_price(it['price'])} \u20ac  {it['subject']}  {it['url']}")
+        stats.matched += 1
+        LOGGER.info(
+            "listing matched id=%s price=%s subject=%r url=%s",
+            it["id"],
+            fmt_price(it["price"]),
+            it["subject"],
+            it["url"],
+        )
         if dry_run:
             continue
 
         try:
             notify(cfg, it)
-        except RequestException as e:
-            print(f"  -> notification failed for {it['id']}: {e}", file=sys.stderr)
-            notification_failures += 1
+        except (RequestException, KeyError) as e:
+            LOGGER.error(
+                "notification failed id=%s error_type=%s",
+                it["id"],
+                type(e).__name__,
+            )
+            stats.failures += 1
             continue
 
         seen.add(it["id"])
-        print(f"  -> notified {it['id']}")
-    return len(items), notification_failures
+        stats.notified += 1
+        LOGGER.info("notification delivered id=%s", it["id"])
+    return stats
 
 
 def main():
+    configure_logging()
     ap = argparse.ArgumentParser(description="Subito.it watcher with ntfy notifications")
     ap.add_argument("--once", action="store_true", help="run a single check and exit")
     ap.add_argument("--dry-run", action="store_true", help="do not send notifications or update seen state")
@@ -220,25 +284,41 @@ def main():
 
     cfg = load_config(CONFIG_PATH)
     seen = load_seen(SEEN_PATH)
+    log_startup_config(cfg, dry_run=args.dry_run, once=args.once)
 
     while True:
-        notification_failures = 0
+        stats = CycleStats()
+        sleep_seconds = None if args.once else next_sleep(cfg)
         try:
-            _, notification_failures = run_once(cfg, seen, dry_run=args.dry_run)
+            result = run_once(cfg, seen, dry_run=args.dry_run, stats=stats)
+            if result is not None:
+                stats = result
             if not args.dry_run:
                 save_seen(SEEN_PATH, seen)
         except RequestException as e:
-            print(f"error: {e}", file=sys.stderr)
-            if args.once:
-                return 1
+            stats.failures += 1
+            LOGGER.error("fetch failed error_type=%s", type(e).__name__)
         except (ValueError, KeyError, json.JSONDecodeError) as e:
-            print(f"parse error: {e}", file=sys.stderr)
-            if args.once:
-                return 1
+            stats.failures += 1
+            LOGGER.error("response parsing failed error_type=%s", type(e).__name__)
+        except OSError as e:
+            stats.failures += 1
+            LOGGER.error("state persistence failed error_type=%s", type(e).__name__)
+
+        LOGGER.log(
+            logging.WARNING if stats.failures else logging.INFO,
+            "polling cycle summary fetched=%d matched=%d notified=%d failures=%d "
+            "next_poll_seconds=%s",
+            stats.fetched,
+            stats.matched,
+            stats.notified,
+            stats.failures,
+            sleep_seconds if sleep_seconds is not None else "none",
+        )
 
         if args.once:
-            return 1 if notification_failures else 0
-        time.sleep(next_sleep(cfg))
+            return 1 if stats.failures else 0
+        time.sleep(sleep_seconds)
 
 
 if __name__ == "__main__":

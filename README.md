@@ -1,21 +1,17 @@
 # subot
 
-A small Subito.it watcher that sends matching listings to an ntfy topic.
-
-It periodically checks the configured Subito search, filters listings by price,
-and sends new matches through ntfy. Notified listing IDs are saved so the same
-listing is not sent twice.
+A Subito.it watcher that sends new listings matching a price range to ntfy.
 
 ## Setup
 
-Create `config.json` from the example and replace the placeholder values:
+Create and edit the configuration:
 
 ```bash
 cp config.example.json config.json
 chmod 600 config.json
 ```
 
-Install the dependency in a virtual environment:
+Create a virtual environment and install the dependencies:
 
 ```bash
 python3 -m venv .venv
@@ -23,7 +19,7 @@ python3 -m venv .venv
 pip install -r requirements.txt
 ```
 
-Test the configuration without sending notifications or updating `seen.json`:
+Test the configuration without sending notifications:
 
 ```bash
 python subot.py --once --dry-run
@@ -35,5 +31,24 @@ Run the bot continuously:
 python subot.py
 ```
 
-Processed listing IDs are stored in `seen.json` to prevent duplicate
-notifications.
+## Optional: user-level systemd service
+
+Copy the user-service template (no root required):
+
+```bash
+mkdir -p ~/.config/systemd/user
+cp systemd/subot.service ~/.config/systemd/user/subot.service
+```
+
+Replace `/absolute/path/to/subot` in the copied file, then enable it:
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now subot.service
+```
+
+Check its status:
+
+```bash
+systemctl --user status subot.service
+```

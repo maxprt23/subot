@@ -1,0 +1,14 @@
+[Unit]
+Description=Subito.it listing watcher
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/absolute/path/to/subot
+ExecStart=/absolute/path/to/subot/.venv/bin/python /absolute/path/to/subot/subot.py
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=default.target
