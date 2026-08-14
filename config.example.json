@@ -1,5 +1,8 @@
 {
-  "search_url": "https://www.subito.it/annunci-italia/vendita/usato/?q=example&ps=100&pe=500&shp=true",
+  "search_urls": [
+    "https://www.subito.it/annunci-italia/vendita/usato/?q=example&ps=100&pe=500&shp=true",
+    "https://www.subito.it/annunci-lazio/vendita/usato/?q=another-example"
+  ],
   "poll_interval_min": 300,
   "poll_interval_max": 600,
   "ntfy_server": "https://ntfy.sh",

@@ -92,18 +92,20 @@ class NotificationTests(unittest.TestCase):
 class LoggingTests(unittest.TestCase):
     def test_malformed_ipv6_url_is_logged_as_invalid(self):
         cfg = {
-            "search_url": "http://[bad",
+            "search_urls": ["http://[bad"],
             "ntfy_server": "https://ntfy.example",
         }
 
         with self.assertLogs("subot", level="INFO") as logs:
             subot.log_startup_config(cfg, dry_run=False, once=False)
 
-        self.assertIn("search_origin=invalid", "\n".join(logs.output))
+        self.assertIn("search_origins=invalid", "\n".join(logs.output))
 
     def test_startup_config_omits_credentials_topics_and_queries(self):
         cfg = {
-            "search_url": "https://search-secret@example.test/items?q=private",
+            "search_urls": [
+                "https://search-secret@example.test/items?q=private"
+            ],
             "ntfy_server": "https://server-secret@ntfy.example/private-base",
             "ntfy_topic": "private-topic",
             "ntfy_token": "private-token",
@@ -115,7 +117,7 @@ class LoggingTests(unittest.TestCase):
             subot.log_startup_config(cfg, dry_run=False, once=False)
 
         output = "\n".join(logs.output)
-        self.assertIn("search_origin=https://example.test", output)
+        self.assertIn("search_origins=https://example.test", output)
         self.assertIn("ntfy_origin=https://ntfy.example", output)
         for secret in ("search-secret", "private", "server-secret", "private-token"):
             self.assertNotIn(secret, output)
@@ -217,64 +219,145 @@ class NextSleepTests(unittest.TestCase):
             subot.next_sleep(cfg)
 
 
+class MultipleSearchTests(unittest.TestCase):
+    def setUp(self):
+        self.urls = [
+            "https://example.test/first?secret=one",
+            "https://example.test/second?secret=two",
+        ]
+        self.cfg = {
+            "search_urls": self.urls,
+            "poll_interval_min": 5,
+            "poll_interval_max": 10,
+        }
+
+    def test_initial_schedule_makes_every_search_due_immediately(self):
+        deadlines = subot.make_schedule(self.urls, 100)
+
+        self.assertEqual(deadlines, {0: 100, 1: 100})
+
+    @patch("subot.save_seen")
+    @patch("subot.run_search")
+    def test_continuous_mode_validates_intervals_before_first_search(
+        self, run_search, save_seen
+    ):
+        self.cfg["poll_interval_min"] = 0
+
+        with self.assertRaisesRegex(ValueError, "must be positive"):
+            subot.run_continuously(
+                self.cfg, self.urls, set(), False, "/tmp/seen.json"
+            )
+
+        run_search.assert_not_called()
+        save_seen.assert_not_called()
+
+    @patch("subot.save_seen")
+    @patch("subot.notify")
+    @patch("subot.extract_items")
+    @patch("subot.fetch_page", return_value="html")
+    def test_once_shares_seen_across_overlapping_searches(
+        self, fetch, extract, notify, save_seen
+    ):
+        saved_states = []
+        save_seen.side_effect = lambda path, ids: saved_states.append(set(ids))
+        extract.side_effect = [
+            [raw_item("1", 200)],
+            [raw_item("1", 200), raw_item("2", 250)],
+        ]
+        seen = set()
+
+        result = subot.run_all_once(
+            self.cfg, self.urls, seen, False, "/tmp/seen.json"
+        )
+
+        self.assertEqual(result, 0)
+        self.assertEqual(fetch.call_args_list[0].args, (self.urls[0],))
+        self.assertEqual(fetch.call_args_list[1].args, (self.urls[1],))
+        self.assertEqual(notify.call_count, 2)
+        self.assertEqual(seen, {"1", "2"})
+        self.assertEqual(saved_states, [{"1"}, {"1", "2"}])
+
+    @patch("subot.save_seen")
+    @patch("subot.run_search")
+    def test_once_checks_every_search_and_reports_any_failure(
+        self, run_search, save_seen
+    ):
+        run_search.side_effect = [
+            subot.CycleStats(failures=1),
+            subot.CycleStats(fetched=2),
+        ]
+
+        result = subot.run_all_once(
+            self.cfg, self.urls, set(), False, "/tmp/seen.json"
+        )
+
+        self.assertEqual(result, 1)
+        self.assertEqual(run_search.call_count, 2)
+        self.assertEqual(
+            [call.args[1] for call in run_search.call_args_list], self.urls
+        )
+        self.assertEqual(save_seen.call_count, 2)
+
+    @patch("subot.time.sleep")
+    @patch("subot.time.monotonic", side_effect=[0, 0, 0, 0, 0, 0])
+    @patch("subot.next_sleep", side_effect=[100, 200])
+    @patch("subot.save_seen")
+    @patch("subot.run_search")
+    def test_initial_searches_run_immediately_before_rescheduled_search(
+        self, run_search, save_seen, next_sleep, monotonic, sleep
+    ):
+        run_search.side_effect = [
+            subot.CycleStats(failures=1),
+            subot.CycleStats(),
+            RuntimeError("stop test loop"),
+        ]
+
+        with self.assertRaisesRegex(RuntimeError, "stop test loop"):
+            subot.run_continuously(
+                self.cfg, self.urls, set(), True, "/tmp/seen.json"
+            )
+
+        self.assertEqual(
+            [call.args[1] for call in run_search.call_args_list],
+            [self.urls[0], self.urls[1], self.urls[0]],
+        )
+        sleep.assert_called_once_with(100)
+
+    @patch("subot.save_seen", side_effect=[OSError("disk full"), None])
+    @patch("subot.run_search", return_value=subot.CycleStats())
+    def test_once_returns_failure_when_persistence_fails(
+        self, run_search, save_seen
+    ):
+        with self.assertLogs("subot", level="ERROR"):
+            result = subot.run_all_once(
+                self.cfg, self.urls, set(), False, "/tmp/seen.json"
+            )
+
+        self.assertEqual(result, 1)
+        self.assertEqual(run_search.call_count, 2)
+        self.assertEqual(save_seen.call_count, 2)
+
+
 class MainTests(unittest.TestCase):
+    @patch("subot.run_all_once", return_value=1)
     @patch(
         "subot.load_config",
-        return_value={"poll_interval_min": 300, "poll_interval_max": 300},
+        return_value={
+            "search_urls": ["https://example.test/one", "https://example.test/two"],
+            "poll_interval_min": 300,
+            "poll_interval_max": 300,
+        },
     )
     @patch("subot.load_seen", return_value=set())
-    @patch("subot.run_once", side_effect=RequestException("unavailable"))
-    def test_once_returns_failure_when_fetch_fails(self, run_once, load_seen, load_config):
+    def test_once_delegates_all_urls_and_returns_failure(
+        self, load_seen, load_config, run_all_once
+    ):
         with patch("sys.argv", ["subot.py", "--once"]):
             self.assertEqual(subot.main(), 1)
 
-    @patch(
-        "subot.load_config",
-        return_value={"poll_interval_min": 300, "poll_interval_max": 300},
-    )
-    @patch("subot.load_seen", return_value=set())
-    @patch("subot.save_seen")
-    def test_summary_preserves_counts_when_cycle_fails(
-        self, save_seen, load_seen, load_config
-    ):
-        def fail_after_fetch(cfg, seen, dry_run, stats):
-            stats.fetched = 4
-            stats.matched = 2
-            raise ValueError("bad response")
-
-        with patch("subot.run_once", side_effect=fail_after_fetch):
-            with self.assertLogs("subot", level="INFO") as logs:
-                with patch("sys.argv", ["subot.py", "--once"]):
-                    self.assertEqual(subot.main(), 1)
-
-        summaries = [line for line in logs.output if "polling cycle summary" in line]
-        self.assertEqual(len(summaries), 1)
-        self.assertIn("fetched=4 matched=2 notified=0 failures=1", summaries[0])
-
-    @patch("subot.save_seen")
-    @patch(
-        "subot.load_config",
-        return_value={"poll_interval_min": 300, "poll_interval_max": 300},
-    )
-    @patch("subot.load_seen", return_value=set())
-    @patch("subot.run_once")
-    def test_once_returns_failure_when_notification_fails(
-        self, run_once, load_seen, load_config, save_seen
-    ):
-        def fail_notification(cfg, seen, dry_run, stats):
-            stats.fetched = 1
-            stats.failures = 1
-
-        run_once.side_effect = fail_notification
-        with self.assertLogs("subot", level="INFO") as logs:
-            with patch("sys.argv", ["subot.py", "--once"]):
-                self.assertEqual(subot.main(), 1)
-
-        summaries = [line for line in logs.output if "polling cycle summary" in line]
-        self.assertEqual(len(summaries), 1)
-        self.assertIn(
-            "fetched=1 matched=0 notified=0 failures=1 next_poll_seconds=none",
-            summaries[0],
+        self.assertEqual(
+            run_all_once.call_args.args[1],
+            load_config.return_value["search_urls"],
         )
 
 
