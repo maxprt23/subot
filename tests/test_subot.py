@@ -141,6 +141,26 @@ class RunOnceTests(unittest.TestCase):
         self.assertEqual(seen, {"1"})
 
 
+class NextSleepTests(unittest.TestCase):
+    def test_uniform_range_respects_bounds(self):
+        cfg = {"poll_interval_min": 5, "poll_interval_max": 10}
+        for _ in range(100):
+            self.assertIn(subot.next_sleep(cfg), range(5, 11))
+
+    def test_falls_back_to_poll_interval(self):
+        cfg = {"poll_interval": 300}
+        for _ in range(100):
+            self.assertEqual(subot.next_sleep(cfg), 300)
+
+    def test_swaps_inverted_bounds(self):
+        cfg = {"poll_interval_min": 10, "poll_interval_max": 5}
+        for _ in range(100):
+            self.assertIn(subot.next_sleep(cfg), range(5, 11))
+
+    def test_defaults_to_300(self):
+        self.assertEqual(subot.next_sleep({}), 300)
+
+
 class MainTests(unittest.TestCase):
     @patch("subot.load_config", return_value={"poll_interval": 300})
     @patch("subot.load_seen", return_value=set())

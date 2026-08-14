@@ -3,6 +3,7 @@ import argparse
 from email.header import Header
 import json
 import os
+import random
 import re
 import sys
 import tempfile
@@ -146,6 +147,15 @@ def fmt_price(p):
     return str(int(p)) if p is not None and p == int(p) else str(p)
 
 
+def next_sleep(cfg):
+    default = int(cfg.get("poll_interval", 300))
+    lo = int(cfg.get("poll_interval_min", default))
+    hi = int(cfg.get("poll_interval_max", default))
+    if lo > hi:
+        lo, hi = hi, lo
+    return random.randint(lo, hi)
+
+
 def encode_header(value):
     value = str(value).replace("\r", " ").replace("\n", " ")
     try:
@@ -216,7 +226,6 @@ def main():
 
     cfg = load_config(CONFIG_PATH)
     seen = load_seen(SEEN_PATH)
-    interval = int(cfg.get("poll_interval", 300))
 
     while True:
         notification_failures = 0
@@ -235,7 +244,7 @@ def main():
 
         if args.once:
             return 1 if notification_failures else 0
-        time.sleep(interval)
+        time.sleep(next_sleep(cfg))
 
 
 if __name__ == "__main__":
