@@ -5,3 +5,4 @@ config.json
 seen.json
 __pycache__/
 *.py[cod]
+.venv/
