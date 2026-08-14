@@ -11,10 +11,8 @@ import time
 import requests
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-CONFIG_PATH = os.environ.get(
-    "SUBOT_CONFIG_PATH", os.path.join(BASE_DIR, "config.json")
-)
-SEEN_PATH = os.environ.get("SUBOT_SEEN_PATH", os.path.join(BASE_DIR, "seen.json"))
+CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
+SEEN_PATH = os.path.join(BASE_DIR, "seen.json")
 
 DEFAULT_UA = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
