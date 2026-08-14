@@ -1,7 +1,5 @@
 {
-  "search_url": "https://www.subito.it/annunci-italia/vendita/usato/?q=example",
-  "min_price": 100,
-  "max_price": 500,
+  "search_url": "https://www.subito.it/annunci-italia/vendita/usato/?q=example&ps=100&pe=500&shp=true",
   "poll_interval_min": 300,
   "poll_interval_max": 600,
   "ntfy_server": "https://ntfy.sh",

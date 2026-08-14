@@ -54,12 +54,10 @@ def url_origin(value):
 
 def log_startup_config(cfg, dry_run, once):
     LOGGER.info(
-        "startup search_origin=%s ntfy_origin=%s min_price=%s max_price=%s "
-        "poll_interval_min=%s poll_interval_max=%s dry_run=%s once=%s",
+        "startup search_origin=%s ntfy_origin=%s poll_interval_min=%s "
+        "poll_interval_max=%s dry_run=%s once=%s",
         url_origin(cfg.get("search_url", "")),
         url_origin(cfg.get("ntfy_server", "")),
-        cfg.get("min_price"),
-        cfg.get("max_price"),
         cfg.get("poll_interval_min"),
         cfg.get("poll_interval_max"),
         dry_run,
@@ -176,16 +174,6 @@ def parse_item(item):
     }
 
 
-def matches_price(price, min_price, max_price):
-    if price is None:
-        return False
-    if min_price is not None and price < min_price:
-        return False
-    if max_price is not None and price > max_price:
-        return False
-    return True
-
-
 def fmt_price(p):
     return str(int(p)) if p == int(p) else str(p)
 
@@ -242,7 +230,7 @@ def run_once(cfg, seen, dry_run, stats):
             continue
         if it["id"] in seen:
             continue
-        if not matches_price(it["price"], cfg.get("min_price"), cfg.get("max_price")):
+        if it["price"] is None:
             continue
 
         stats.matched += 1
