@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 import argparse
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from email.header import Header
+import hashlib
 import json
 import logging
 import os
@@ -24,9 +25,16 @@ LOGGER = logging.getLogger("subot")
 @dataclass
 class CycleStats:
     fetched: int = 0
+    baselined: int = 0
     matched: int = 0
     notified: int = 0
     failures: int = 0
+
+
+@dataclass
+class SeenState:
+    listing_ids: set = field(default_factory=set)
+    initialized_searches: set = field(default_factory=set)
 
 
 def configure_logging():
@@ -81,14 +89,34 @@ def load_config(path):
         return json.load(f)
 
 
+def search_key(search_url):
+    return hashlib.sha256(search_url.encode("utf-8")).hexdigest()
+
+
 def load_seen(path):
     if not os.path.exists(path):
-        return set()
+        return SeenState()
     with open(path, encoding="utf-8") as f:
-        return set(json.load(f))
+        data = json.load(f)
+
+    if not isinstance(data, dict) or data.get("version") != 1:
+        raise ValueError("seen state has an unsupported format")
+
+    listing_ids = data.get("listing_ids")
+    initialized_searches = data.get("initialized_searches")
+    if not isinstance(listing_ids, list) or not isinstance(
+        initialized_searches, list
+    ):
+        raise ValueError("seen state is malformed")
+    if any(not isinstance(value, str) for value in listing_ids):
+        raise ValueError("seen state listing IDs must be strings")
+    if any(not isinstance(value, str) for value in initialized_searches):
+        raise ValueError("seen state search keys must be strings")
+
+    return SeenState(set(listing_ids), set(initialized_searches))
 
 
-def save_seen(path, ids):
+def save_seen(path, state):
     directory = os.path.dirname(os.path.abspath(path))
     basename = os.path.basename(path)
     fd, temporary_path = tempfile.mkstemp(
@@ -98,7 +126,17 @@ def save_seen(path, ids):
     )
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(sorted(ids), f, indent=2)
+            json.dump(
+                {
+                    "version": 1,
+                    "listing_ids": sorted(state.listing_ids),
+                    "initialized_searches": sorted(
+                        state.initialized_searches
+                    ),
+                },
+                f,
+                indent=2,
+            )
             f.write("\n")
             f.flush()
             os.fsync(f.fileno())
@@ -235,7 +273,7 @@ def notify(cfg, item):
     r.raise_for_status()
 
 
-def run_once(cfg, search_url, seen, dry_run, stats):
+def run_once(cfg, search_url, seen, dry_run, stats, initialize=False):
     html = fetch_page(search_url)
     items = extract_items(html)
     stats.fetched = len(items)
@@ -243,6 +281,11 @@ def run_once(cfg, search_url, seen, dry_run, stats):
     for raw in items:
         it = parse_item(raw)
         if not it:
+            continue
+        if initialize and not dry_run:
+            if it["id"] not in seen:
+                stats.baselined += 1
+            seen.add(it["id"])
             continue
         if it["id"] in seen:
             continue
@@ -276,7 +319,15 @@ def run_once(cfg, search_url, seen, dry_run, stats):
         LOGGER.info("notification delivered id=%s", it["id"])
 
 
-def run_search(cfg, search_url, search_number, search_count, seen, dry_run):
+def run_search(
+    cfg,
+    search_url,
+    search_number,
+    search_count,
+    seen,
+    dry_run,
+    initialize=False,
+):
     stats = CycleStats()
     try:
         run_once(
@@ -285,6 +336,7 @@ def run_search(cfg, search_url, search_number, search_count, seen, dry_run):
             seen,
             dry_run=dry_run,
             stats=stats,
+            initialize=initialize,
         )
     except RequestException as e:
         stats.failures += 1
@@ -311,12 +363,13 @@ def run_search(cfg, search_url, search_number, search_count, seen, dry_run):
 def log_summary(stats, search_number, search_count, search_url, next_poll_seconds):
     LOGGER.log(
         logging.WARNING if stats.failures else logging.INFO,
-        "polling cycle summary search=%d/%d origin=%s fetched=%d matched=%d "
-        "notified=%d failures=%d next_poll_seconds=%s",
+        "polling cycle summary search=%d/%d origin=%s fetched=%d baselined=%d "
+        "matched=%d notified=%d failures=%d next_poll_seconds=%s",
         search_number,
         search_count,
         url_origin(search_url),
         stats.fetched,
+        stats.baselined,
         stats.matched,
         stats.notified,
         stats.failures,
@@ -324,17 +377,34 @@ def log_summary(stats, search_number, search_count, search_url, next_poll_second
     )
 
 
-def run_all_once(cfg, search_urls, seen, dry_run, seen_path):
+def run_all_once(cfg, search_urls, state, dry_run, seen_path):
     failures = 0
     search_count = len(search_urls)
     for index, search_url in enumerate(search_urls, start=1):
+        key = search_key(search_url)
+        initialize = not dry_run and key not in state.initialized_searches
         stats = run_search(
-            cfg, search_url, index, search_count, seen, dry_run
+            cfg,
+            search_url,
+            index,
+            search_count,
+            state.listing_ids,
+            dry_run,
+            initialize=initialize,
         )
+
+        if initialize and not stats.failures:
+            state.initialized_searches.add(key)
+            LOGGER.info(
+                "search baseline initialized search=%d/%d listings=%d",
+                index,
+                search_count,
+                stats.baselined,
+            )
 
         if not dry_run:
             try:
-                save_seen(seen_path, seen)
+                save_seen(seen_path, state)
             except OSError as e:
                 stats.failures += 1
                 LOGGER.error(
@@ -350,7 +420,7 @@ def run_all_once(cfg, search_urls, seen, dry_run, seen_path):
     return 1 if failures else 0
 
 
-def run_continuously(cfg, search_urls, seen, dry_run, seen_path):
+def run_continuously(cfg, search_urls, state, dry_run, seen_path):
     poll_interval_bounds(cfg)
     search_count = len(search_urls)
     now = time.monotonic()
@@ -363,14 +433,26 @@ def run_continuously(cfg, search_urls, seen, dry_run, seen_path):
             time.sleep(delay)
 
         search_url = search_urls[search_index]
+        key = search_key(search_url)
+        initialize = not dry_run and key not in state.initialized_searches
         stats = run_search(
             cfg,
             search_url,
             search_index + 1,
             search_count,
-            seen,
+            state.listing_ids,
             dry_run,
+            initialize=initialize,
         )
+
+        if initialize and not stats.failures:
+            state.initialized_searches.add(key)
+            LOGGER.info(
+                "search baseline initialized search=%d/%d listings=%d",
+                search_index + 1,
+                search_count,
+                stats.baselined,
+            )
 
         # Always move this search into the future, including after a failure.
         sleep_seconds = next_sleep(cfg)
@@ -378,7 +460,7 @@ def run_continuously(cfg, search_urls, seen, dry_run, seen_path):
 
         if not dry_run:
             try:
-                save_seen(seen_path, seen)
+                save_seen(seen_path, state)
             except OSError as e:
                 stats.failures += 1
                 LOGGER.error(
@@ -405,15 +487,15 @@ def main():
     args = ap.parse_args()
 
     cfg = load_config(CONFIG_PATH)
-    seen = load_seen(SEEN_PATH)
+    state = load_seen(SEEN_PATH)
     search_urls = get_search_urls(cfg)
     log_startup_config(cfg, dry_run=args.dry_run, once=args.once)
 
     if args.once:
         return run_all_once(
-            cfg, search_urls, seen, args.dry_run, SEEN_PATH
+            cfg, search_urls, state, args.dry_run, SEEN_PATH
         )
-    run_continuously(cfg, search_urls, seen, args.dry_run, SEEN_PATH)
+    run_continuously(cfg, search_urls, state, args.dry_run, SEEN_PATH)
 
 
 if __name__ == "__main__":
