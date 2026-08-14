@@ -53,16 +53,27 @@ def url_origin(value):
 
 
 def log_startup_config(cfg, dry_run, once):
+    search_urls = get_search_urls(cfg)
     LOGGER.info(
-        "startup search_origin=%s ntfy_origin=%s poll_interval_min=%s "
+        "startup searches=%d search_origins=%s ntfy_origin=%s poll_interval_min=%s "
         "poll_interval_max=%s dry_run=%s once=%s",
-        url_origin(cfg.get("search_url", "")),
+        len(search_urls),
+        ",".join(sorted(set(url_origin(url) for url in search_urls))),
         url_origin(cfg.get("ntfy_server", "")),
         cfg.get("poll_interval_min"),
         cfg.get("poll_interval_max"),
         dry_run,
         once,
     )
+
+
+def get_search_urls(cfg):
+    urls = cfg.get("search_urls")
+    if not isinstance(urls, list) or not urls:
+        raise ValueError("search_urls must be a non-empty list")
+    if any(not isinstance(url, str) or not url.strip() for url in urls):
+        raise ValueError("search_urls entries must be non-empty strings")
+    return urls
 
 
 def load_config(path):
@@ -178,13 +189,18 @@ def fmt_price(p):
     return str(int(p)) if p == int(p) else str(p)
 
 
-def next_sleep(cfg):
+def poll_interval_bounds(cfg):
     lo = int(cfg["poll_interval_min"])
     hi = int(cfg["poll_interval_max"])
     if lo > hi:
         raise ValueError("poll_interval_min must not exceed poll_interval_max")
     if lo < 1:
         raise ValueError("poll intervals must be positive")
+    return lo, hi
+
+
+def next_sleep(cfg):
+    lo, hi = poll_interval_bounds(cfg)
     return random.randint(lo, hi)
 
 
@@ -219,8 +235,11 @@ def notify(cfg, item):
     r.raise_for_status()
 
 
-def run_once(cfg, seen, dry_run, stats):
-    html = fetch_page(cfg["search_url"])
+def run_once(cfg, seen, dry_run, stats, search_url=None):
+    # Keep the optional lookup for callers that check one search directly.
+    if search_url is None:
+        search_url = cfg["search_url"]
+    html = fetch_page(search_url)
     items = extract_items(html)
     stats.fetched = len(items)
 
@@ -260,6 +279,130 @@ def run_once(cfg, seen, dry_run, stats):
         LOGGER.info("notification delivered id=%s", it["id"])
 
 
+def run_search(cfg, search_url, search_number, search_count, seen, dry_run):
+    stats = CycleStats()
+    try:
+        run_once(
+            cfg,
+            seen,
+            dry_run=dry_run,
+            stats=stats,
+            search_url=search_url,
+        )
+    except RequestException as e:
+        stats.failures += 1
+        LOGGER.error(
+            "fetch failed search=%d/%d origin=%s error_type=%s",
+            search_number,
+            search_count,
+            url_origin(search_url),
+            type(e).__name__,
+        )
+    except (ValueError, KeyError, json.JSONDecodeError) as e:
+        stats.failures += 1
+        LOGGER.error(
+            "response parsing failed search=%d/%d origin=%s error_type=%s",
+            search_number,
+            search_count,
+            url_origin(search_url),
+            type(e).__name__,
+        )
+
+    return stats
+
+
+def log_summary(stats, search_number, search_count, search_url, next_poll_seconds):
+    LOGGER.log(
+        logging.WARNING if stats.failures else logging.INFO,
+        "polling cycle summary search=%d/%d origin=%s fetched=%d matched=%d "
+        "notified=%d failures=%d next_poll_seconds=%s",
+        search_number,
+        search_count,
+        url_origin(search_url),
+        stats.fetched,
+        stats.matched,
+        stats.notified,
+        stats.failures,
+        next_poll_seconds if next_poll_seconds is not None else "none",
+    )
+
+
+def run_all_once(cfg, search_urls, seen, dry_run, seen_path):
+    failures = 0
+    search_count = len(search_urls)
+    for index, search_url in enumerate(search_urls, start=1):
+        stats = run_search(
+            cfg, search_url, index, search_count, seen, dry_run
+        )
+
+        if not dry_run:
+            try:
+                save_seen(seen_path, seen)
+            except OSError as e:
+                stats.failures += 1
+                LOGGER.error(
+                    "state persistence failed search=%d/%d error_type=%s",
+                    index,
+                    search_count,
+                    type(e).__name__,
+                )
+
+        failures += stats.failures
+        log_summary(stats, index, search_count, search_url, None)
+
+    return 1 if failures else 0
+
+
+def make_schedule(search_urls, now):
+    return {index: now for index in range(len(search_urls))}
+
+
+def run_continuously(cfg, search_urls, seen, dry_run, seen_path):
+    poll_interval_bounds(cfg)
+    search_count = len(search_urls)
+    deadlines = make_schedule(search_urls, time.monotonic())
+
+    while True:
+        search_index = min(deadlines, key=deadlines.get)
+        delay = deadlines[search_index] - time.monotonic()
+        if delay > 0:
+            time.sleep(delay)
+
+        search_url = search_urls[search_index]
+        stats = run_search(
+            cfg,
+            search_url,
+            search_index + 1,
+            search_count,
+            seen,
+            dry_run,
+        )
+
+        # Always move this search into the future, including after a failure.
+        sleep_seconds = next_sleep(cfg)
+        deadlines[search_index] = time.monotonic() + sleep_seconds
+
+        if not dry_run:
+            try:
+                save_seen(seen_path, seen)
+            except OSError as e:
+                stats.failures += 1
+                LOGGER.error(
+                    "state persistence failed search=%d/%d error_type=%s",
+                    search_index + 1,
+                    search_count,
+                    type(e).__name__,
+                )
+
+        log_summary(
+            stats,
+            search_index + 1,
+            search_count,
+            search_url,
+            sleep_seconds,
+        )
+
+
 def main():
     configure_logging()
     ap = argparse.ArgumentParser(description="Subito.it watcher with ntfy notifications")
@@ -269,39 +412,14 @@ def main():
 
     cfg = load_config(CONFIG_PATH)
     seen = load_seen(SEEN_PATH)
+    search_urls = get_search_urls(cfg)
     log_startup_config(cfg, dry_run=args.dry_run, once=args.once)
 
-    while True:
-        stats = CycleStats()
-        sleep_seconds = None if args.once else next_sleep(cfg)
-        try:
-            run_once(cfg, seen, dry_run=args.dry_run, stats=stats)
-            if not args.dry_run:
-                save_seen(SEEN_PATH, seen)
-        except RequestException as e:
-            stats.failures += 1
-            LOGGER.error("fetch failed error_type=%s", type(e).__name__)
-        except (ValueError, KeyError, json.JSONDecodeError) as e:
-            stats.failures += 1
-            LOGGER.error("response parsing failed error_type=%s", type(e).__name__)
-        except OSError as e:
-            stats.failures += 1
-            LOGGER.error("state persistence failed error_type=%s", type(e).__name__)
-
-        LOGGER.log(
-            logging.WARNING if stats.failures else logging.INFO,
-            "polling cycle summary fetched=%d matched=%d notified=%d failures=%d "
-            "next_poll_seconds=%s",
-            stats.fetched,
-            stats.matched,
-            stats.notified,
-            stats.failures,
-            sleep_seconds if sleep_seconds is not None else "none",
+    if args.once:
+        return run_all_once(
+            cfg, search_urls, seen, args.dry_run, SEEN_PATH
         )
-
-        if args.once:
-            return 1 if stats.failures else 0
-        time.sleep(sleep_seconds)
+    run_continuously(cfg, search_urls, seen, args.dry_run, SEEN_PATH)
 
 
 if __name__ == "__main__":
