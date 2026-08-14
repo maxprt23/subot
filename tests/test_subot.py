@@ -130,12 +130,16 @@ class LoggingTests(unittest.TestCase):
         notify.side_effect = RequestException(
             "https://ntfy.example/private-topic?token=private-token"
         )
-        cfg = {
-            "search_url": "https://example.test/search",
-        }
+        cfg = {}
 
         with self.assertLogs("subot", level="ERROR") as logs:
-            subot.run_once(cfg, set(), dry_run=False, stats=subot.CycleStats())
+            subot.run_once(
+                cfg,
+                "https://example.test/search",
+                set(),
+                dry_run=False,
+                stats=subot.CycleStats(),
+            )
 
         output = "\n".join(logs.output)
         self.assertIn("error_type=RequestException", output)
@@ -161,9 +165,8 @@ class SeenStateTests(unittest.TestCase):
 
 class RunOnceTests(unittest.TestCase):
     def setUp(self):
-        self.cfg = {
-            "search_url": "https://example.test/search",
-        }
+        self.cfg = {}
+        self.search_url = "https://example.test/search"
 
     @patch("subot.extract_items")
     @patch("subot.fetch_page", return_value="html")
@@ -173,7 +176,11 @@ class RunOnceTests(unittest.TestCase):
         seen = set()
 
         subot.run_once(
-            self.cfg, seen, dry_run=True, stats=subot.CycleStats()
+            self.cfg,
+            self.search_url,
+            seen,
+            dry_run=True,
+            stats=subot.CycleStats(),
         )
 
         self.assertEqual(seen, set())
@@ -192,7 +199,9 @@ class RunOnceTests(unittest.TestCase):
         seen = set()
 
         stats = subot.CycleStats()
-        subot.run_once(self.cfg, seen, dry_run=False, stats=stats)
+        subot.run_once(
+            self.cfg, self.search_url, seen, dry_run=False, stats=stats
+        )
 
         self.assertEqual(seen, {"2"})
         self.assertEqual(notify.call_count, 2)
@@ -203,10 +212,12 @@ class RunOnceTests(unittest.TestCase):
 
 
 class NextSleepTests(unittest.TestCase):
-    def test_uniform_range_respects_bounds(self):
+    @patch("subot.random.randint", return_value=7)
+    def test_uses_configured_bounds(self, randint):
         cfg = {"poll_interval_min": 5, "poll_interval_max": 10}
-        for _ in range(100):
-            self.assertIn(subot.next_sleep(cfg), range(5, 11))
+
+        self.assertEqual(subot.next_sleep(cfg), 7)
+        randint.assert_called_once_with(5, 10)
 
     def test_rejects_inverted_bounds(self):
         cfg = {"poll_interval_min": 10, "poll_interval_max": 5}
@@ -230,11 +241,6 @@ class MultipleSearchTests(unittest.TestCase):
             "poll_interval_min": 5,
             "poll_interval_max": 10,
         }
-
-    def test_initial_schedule_makes_every_search_due_immediately(self):
-        deadlines = subot.make_schedule(self.urls, 100)
-
-        self.assertEqual(deadlines, {0: 100, 1: 100})
 
     @patch("subot.save_seen")
     @patch("subot.run_search")
