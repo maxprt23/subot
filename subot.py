@@ -60,8 +60,8 @@ def log_startup_config(cfg, dry_run, once):
         url_origin(cfg.get("ntfy_server", "")),
         cfg.get("min_price"),
         cfg.get("max_price"),
-        cfg.get("poll_interval_min", cfg.get("poll_interval", 300)),
-        cfg.get("poll_interval_max", cfg.get("poll_interval", 300)),
+        cfg.get("poll_interval_min"),
+        cfg.get("poll_interval_max"),
         dry_run,
         once,
     )
@@ -173,7 +173,6 @@ def parse_item(item):
         "url": (item.get("urls") or {}).get("default", ""),
         "town": (geo.get("town") or {}).get("value", ""),
         "city": (geo.get("city") or {}).get("value", ""),
-        "date": item.get("date", ""),
     }
 
 
@@ -188,15 +187,16 @@ def matches_price(price, min_price, max_price):
 
 
 def fmt_price(p):
-    return str(int(p)) if p is not None and p == int(p) else str(p)
+    return str(int(p)) if p == int(p) else str(p)
 
 
 def next_sleep(cfg):
-    default = int(cfg.get("poll_interval", 300))
-    lo = int(cfg.get("poll_interval_min", default))
-    hi = int(cfg.get("poll_interval_max", default))
+    lo = int(cfg["poll_interval_min"])
+    hi = int(cfg["poll_interval_max"])
     if lo > hi:
-        lo, hi = hi, lo
+        raise ValueError("poll_interval_min must not exceed poll_interval_max")
+    if lo < 1:
+        raise ValueError("poll intervals must be positive")
     return random.randint(lo, hi)
 
 
@@ -215,7 +215,7 @@ def notify(cfg, item):
         x
         for x in [
             item["subject"],
-            f"{fmt_price(item['price'])} \u20ac" if item["price"] is not None else "prezzo n.d.",
+            f"{fmt_price(item['price'])} \u20ac",
             location,
             item["url"],
         ]
@@ -231,9 +231,7 @@ def notify(cfg, item):
     r.raise_for_status()
 
 
-def run_once(cfg, seen, dry_run, stats=None):
-    if stats is None:
-        stats = CycleStats()
+def run_once(cfg, seen, dry_run, stats):
     html = fetch_page(cfg["search_url"])
     items = extract_items(html)
     stats.fetched = len(items)
@@ -272,7 +270,6 @@ def run_once(cfg, seen, dry_run, stats=None):
         seen.add(it["id"])
         stats.notified += 1
         LOGGER.info("notification delivered id=%s", it["id"])
-    return stats
 
 
 def main():
@@ -290,9 +287,7 @@ def main():
         stats = CycleStats()
         sleep_seconds = None if args.once else next_sleep(cfg)
         try:
-            result = run_once(cfg, seen, dry_run=args.dry_run, stats=stats)
-            if result is not None:
-                stats = result
+            run_once(cfg, seen, dry_run=args.dry_run, stats=stats)
             if not args.dry_run:
                 save_seen(SEEN_PATH, seen)
         except RequestException as e:
