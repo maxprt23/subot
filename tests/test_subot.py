@@ -53,6 +53,22 @@ class ExtractItemsTests(unittest.TestCase):
             subot.extract_items("<html></html>")
 
 
+class FetchPageTests(unittest.TestCase):
+    @patch("subot.requests.get")
+    def test_impersonates_chrome(self, get):
+        get.return_value.text = "html"
+
+        self.assertEqual(subot.fetch_page("https://example.test/search"), "html")
+
+        get.assert_called_once_with(
+            "https://example.test/search",
+            headers={"Accept-Language": "it-IT,it;q=0.9,en;q=0.8"},
+            timeout=30,
+            impersonate="chrome",
+        )
+        get.return_value.raise_for_status.assert_called_once_with()
+
+
 class NotificationTests(unittest.TestCase):
     @patch("subot.requests.post")
     def test_unicode_title_is_encoded_as_an_ascii_header(self, post):
@@ -71,6 +87,62 @@ class NotificationTests(unittest.TestCase):
         title = post.call_args.kwargs["headers"]["Title"]
         self.assertTrue(title.startswith("=?utf-8?"))
         title.encode("ascii")
+
+
+class LoggingTests(unittest.TestCase):
+    def test_malformed_ipv6_url_is_logged_as_invalid(self):
+        cfg = {
+            "search_url": "http://[bad",
+            "ntfy_server": "https://ntfy.example",
+        }
+
+        with self.assertLogs("subot", level="INFO") as logs:
+            subot.log_startup_config(cfg, dry_run=False, once=False)
+
+        self.assertIn("search_origin=invalid", "\n".join(logs.output))
+
+    def test_startup_config_omits_credentials_topics_and_queries(self):
+        cfg = {
+            "search_url": "https://search-secret@example.test/items?q=private",
+            "ntfy_server": "https://server-secret@ntfy.example/private-base",
+            "ntfy_topic": "private-topic",
+            "ntfy_token": "private-token",
+            "min_price": 100,
+            "max_price": 500,
+            "poll_interval_min": 60,
+            "poll_interval_max": 120,
+        }
+
+        with self.assertLogs("subot", level="INFO") as logs:
+            subot.log_startup_config(cfg, dry_run=False, once=False)
+
+        output = "\n".join(logs.output)
+        self.assertIn("search_origin=https://example.test", output)
+        self.assertIn("ntfy_origin=https://ntfy.example", output)
+        for secret in ("search-secret", "private", "server-secret", "private-token"):
+            self.assertNotIn(secret, output)
+
+    @patch("subot.extract_items")
+    @patch("subot.fetch_page", return_value="html")
+    @patch("subot.notify")
+    def test_notification_error_does_not_log_sensitive_exception(self, notify, fetch, extract):
+        extract.return_value = [raw_item("1", 200)]
+        notify.side_effect = RequestException(
+            "https://ntfy.example/private-topic?token=private-token"
+        )
+        cfg = {
+            "search_url": "https://example.test/search",
+            "min_price": 100,
+            "max_price": 500,
+        }
+
+        with self.assertLogs("subot", level="ERROR") as logs:
+            subot.run_once(cfg, set(), dry_run=False)
+
+        output = "\n".join(logs.output)
+        self.assertIn("error_type=RequestException", output)
+        self.assertNotIn("private-topic", output)
+        self.assertNotIn("private-token", output)
 
 
 class SeenStateTests(unittest.TestCase):
@@ -121,11 +193,14 @@ class RunOnceTests(unittest.TestCase):
         notify.side_effect = [RequestException("unavailable"), None]
         seen = set()
 
-        _, notification_failures = subot.run_once(self.cfg, seen, dry_run=False)
+        stats = subot.run_once(self.cfg, seen, dry_run=False)
 
         self.assertEqual(seen, {"2"})
         self.assertEqual(notify.call_count, 2)
-        self.assertEqual(notification_failures, 1)
+        self.assertEqual(stats.fetched, 3)
+        self.assertEqual(stats.matched, 2)
+        self.assertEqual(stats.notified, 1)
+        self.assertEqual(stats.failures, 1)
 
     @patch("subot.extract_items")
     @patch("subot.fetch_page", return_value="html")
@@ -169,15 +244,43 @@ class MainTests(unittest.TestCase):
         with patch("sys.argv", ["subot.py", "--once"]):
             self.assertEqual(subot.main(), 1)
 
+    @patch("subot.load_config", return_value={"poll_interval": 300})
+    @patch("subot.load_seen", return_value=set())
+    @patch("subot.save_seen")
+    def test_summary_preserves_counts_when_cycle_fails(
+        self, save_seen, load_seen, load_config
+    ):
+        def fail_after_fetch(cfg, seen, dry_run, stats):
+            stats.fetched = 4
+            stats.matched = 2
+            raise ValueError("bad response")
+
+        with patch("subot.run_once", side_effect=fail_after_fetch):
+            with self.assertLogs("subot", level="INFO") as logs:
+                with patch("sys.argv", ["subot.py", "--once"]):
+                    self.assertEqual(subot.main(), 1)
+
+        summaries = [line for line in logs.output if "polling cycle summary" in line]
+        self.assertEqual(len(summaries), 1)
+        self.assertIn("fetched=4 matched=2 notified=0 failures=1", summaries[0])
+
     @patch("subot.save_seen")
     @patch("subot.load_config", return_value={"poll_interval": 300})
     @patch("subot.load_seen", return_value=set())
-    @patch("subot.run_once", return_value=(1, 1))
+    @patch("subot.run_once", return_value=subot.CycleStats(fetched=1, failures=1))
     def test_once_returns_failure_when_notification_fails(
         self, run_once, load_seen, load_config, save_seen
     ):
-        with patch("sys.argv", ["subot.py", "--once"]):
-            self.assertEqual(subot.main(), 1)
+        with self.assertLogs("subot", level="INFO") as logs:
+            with patch("sys.argv", ["subot.py", "--once"]):
+                self.assertEqual(subot.main(), 1)
+
+        summaries = [line for line in logs.output if "polling cycle summary" in line]
+        self.assertEqual(len(summaries), 1)
+        self.assertIn(
+            "fetched=1 matched=0 notified=0 failures=1 next_poll_seconds=none",
+            summaries[0],
+        )
 
 
 if __name__ == "__main__":
