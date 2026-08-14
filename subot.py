@@ -235,10 +235,7 @@ def notify(cfg, item):
     r.raise_for_status()
 
 
-def run_once(cfg, seen, dry_run, stats, search_url=None):
-    # Keep the optional lookup for callers that check one search directly.
-    if search_url is None:
-        search_url = cfg["search_url"]
+def run_once(cfg, search_url, seen, dry_run, stats):
     html = fetch_page(search_url)
     items = extract_items(html)
     stats.fetched = len(items)
@@ -284,10 +281,10 @@ def run_search(cfg, search_url, search_number, search_count, seen, dry_run):
     try:
         run_once(
             cfg,
+            search_url,
             seen,
             dry_run=dry_run,
             stats=stats,
-            search_url=search_url,
         )
     except RequestException as e:
         stats.failures += 1
@@ -298,7 +295,7 @@ def run_search(cfg, search_url, search_number, search_count, seen, dry_run):
             url_origin(search_url),
             type(e).__name__,
         )
-    except (ValueError, KeyError, json.JSONDecodeError) as e:
+    except (ValueError, KeyError) as e:
         stats.failures += 1
         LOGGER.error(
             "response parsing failed search=%d/%d origin=%s error_type=%s",
@@ -353,14 +350,11 @@ def run_all_once(cfg, search_urls, seen, dry_run, seen_path):
     return 1 if failures else 0
 
 
-def make_schedule(search_urls, now):
-    return {index: now for index in range(len(search_urls))}
-
-
 def run_continuously(cfg, search_urls, seen, dry_run, seen_path):
     poll_interval_bounds(cfg)
     search_count = len(search_urls)
-    deadlines = make_schedule(search_urls, time.monotonic())
+    now = time.monotonic()
+    deadlines = {index: now for index in range(search_count)}
 
     while True:
         search_index = min(deadlines, key=deadlines.get)
