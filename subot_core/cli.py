@@ -9,9 +9,7 @@ from .runner import run_all_once, run_continuously
 from .state import load_seen
 
 
-# Resolve paths relative to the project root, not the process working
-# directory.  This keeps ``python subot.py`` and an installed console entry
-# point consistent when invoked from a systemd service or another directory.
+# Resolve paths relative to the project root, not the process working directory.
 PACKAGE_DIR = os.path.dirname(os.path.realpath(__file__))
 BASE_DIR = os.path.dirname(PACKAGE_DIR)
 CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
