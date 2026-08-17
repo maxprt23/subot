@@ -15,6 +15,7 @@ dependencies = [
 
 [tool.setuptools]
 py-modules = ["subot"]
+packages = ["subot_core"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -8,3 +8,5 @@ seen.json
 __pycache__/
 *.py[cod]
 .venv/
+build/
+*.egg-info/
