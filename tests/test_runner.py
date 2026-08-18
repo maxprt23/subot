@@ -1,5 +1,6 @@
 import fcntl
 import os
+import signal
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -10,6 +11,14 @@ from subot_core import runner, state
 from subot_core.models import CycleStats, JobStatus, ListingJob, SeenState
 from subot_core.openrouter import OpenRouterDecisionError
 from tests.helpers import raw_item
+
+
+class ChildSignalHandlingTests(unittest.TestCase):
+    @patch("subot_core.runner.signal.signal")
+    def test_child_ignores_sigint_and_uses_supervisor_stop_event(self, signal_call):
+        runner._ignore_sigint_in_child()
+
+        signal_call.assert_called_once_with(signal.SIGINT, signal.SIG_IGN)
 
 
 class RunOnceTests(unittest.TestCase):
@@ -298,8 +307,9 @@ class WorkerTests(unittest.TestCase):
 class ChildProcessLoggingTests(unittest.TestCase):
     @patch("subot_core.runner.run_queued_search", return_value=CycleStats())
     @patch("subot_core.runner.configure_logging")
+    @patch("subot_core.runner._ignore_sigint_in_child")
     def test_poller_configures_logging_in_its_child_process(
-        self, configure_logging, run_queued_search
+        self, ignore_sigint, configure_logging, run_queued_search
     ):
         stop_event = unittest.mock.Mock()
         stop_event.is_set.return_value = False
@@ -314,14 +324,16 @@ class ChildProcessLoggingTests(unittest.TestCase):
                 False,
             )
 
+        ignore_sigint.assert_called_once_with()
         configure_logging.assert_called_once_with()
         run_queued_search.assert_called_once()
 
     @patch("subot_core.runner.openrouter_client_from_config")
     @patch("subot_core.runner.StateStore")
     @patch("subot_core.runner.configure_logging")
+    @patch("subot_core.runner._ignore_sigint_in_child")
     def test_worker_configures_logging_in_its_child_process(
-        self, configure_logging, state_store, client_from_config
+        self, ignore_sigint, configure_logging, state_store, client_from_config
     ):
         stop_event = unittest.mock.Mock()
         stop_event.is_set.return_value = False
@@ -341,6 +353,7 @@ class ChildProcessLoggingTests(unittest.TestCase):
                 False,
             )
 
+        ignore_sigint.assert_called_once_with()
         configure_logging.assert_called_once_with()
         client_from_config.assert_called_once()
 

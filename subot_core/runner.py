@@ -7,6 +7,7 @@ with the original single-file application and its service configuration.
 """
 
 import logging
+import signal
 import time
 from contextlib import contextmanager
 
@@ -30,6 +31,12 @@ from .subito import extract_items, fetch_page, parse_item
 
 LOGGER = logging.getLogger("subot")
 WORKER_IDLE_SECONDS = 0.25
+
+
+def _ignore_sigint_in_child():
+    """Let the supervisor coordinate Ctrl-C through the shared stop event."""
+
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
 
 
 @contextmanager
@@ -143,6 +150,7 @@ def run_queued_search(cfg, search_url, search_number, search_count, store, dry_r
 def run_poller_process(stop_event, poller_done_event, once, cfg, search_urls, state_path, dry_run):
     """Child-process target that polls independently from LLM work."""
 
+    _ignore_sigint_in_child()
     configure_logging()
     del poller_done_event
     with StateStore(state_path) as store:
@@ -243,6 +251,7 @@ def process_claimed_job(cfg, store, client, job):
 def run_worker_process(stop_event, poller_done_event, once, cfg, state_path, dry_run):
     """Child-process target that drains queued listings through OpenRouter."""
 
+    _ignore_sigint_in_child()
     configure_logging()
     if dry_run:
         return
