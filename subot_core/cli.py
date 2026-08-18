@@ -67,14 +67,13 @@ def queue_is_successful(state_path, failure_boundary=0):
         return store.once_successful(failure_boundary)
 
 
-def run_dry_run_once(cfg, search_urls, store):
+def run_dry_run_once(search_urls, store):
     """Poll every search once through the read-only queue path."""
 
     failures = 0
     search_count = len(search_urls)
     for index, search_url in enumerate(search_urls, start=1):
         stats = run_queued_search(
-            cfg,
             search_url,
             index,
             search_count,
@@ -102,7 +101,6 @@ def run_dry_run_continuously(cfg, search_urls, store):
 
         search_url = search_urls[search_index]
         stats = run_queued_search(
-            cfg,
             search_url,
             search_index + 1,
             search_count,
@@ -150,7 +148,7 @@ def main():
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="do not send notifications or update seen state",
+        help="do not send notifications or update persistent state",
     )
     args = parser.parse_args()
 
@@ -161,7 +159,7 @@ def main():
     if args.dry_run:
         with open_dry_run_state(STATE_PATH) as store:
             if args.once:
-                return run_dry_run_once(cfg, search_urls, store)
+                return run_dry_run_once(search_urls, store)
             return run_dry_run_continuously(cfg, search_urls, store)
 
     # Validate in the parent before child processes are created.  This keeps
@@ -179,6 +177,6 @@ def main():
         worker_done=(
             lambda: queue_is_successful(STATE_PATH, once_failure_boundary)
         ) if args.once else None,
-        poller_args=(cfg, search_urls, STATE_PATH, False),
-        worker_args=(cfg, STATE_PATH, False),
+        poller_args=(cfg, search_urls, STATE_PATH),
+        worker_args=(cfg, STATE_PATH),
     )

@@ -2,7 +2,6 @@ import hashlib
 import json
 import os
 import sqlite3
-import tempfile
 import time
 from collections.abc import Iterable, Mapping
 from urllib.parse import quote
@@ -10,8 +9,6 @@ from urllib.parse import quote
 from .models import (
     JobStatus,
     ListingJob,
-    SeenState,
-    TERMINAL_JOB_STATUSES,
 )
 
 
@@ -222,10 +219,6 @@ class StateStore:
             self._rollback()
             raise
 
-    # This name makes the operation discoverable for callers that think in
-    # terms of recording a baseline rather than initializing a search.
-    record_baseline = initialize_search
-
     def enqueue_listing(self, payload: Mapping):
         """Atomically add a new listing to the queue.
 
@@ -313,10 +306,6 @@ class StateStore:
             (listing_id,),
         ).fetchone()
         return row is not None
-
-    def is_listing_terminal(self, listing_id):
-        job = self.get_listing(listing_id)
-        return job is not None and job.status in TERMINAL_JOB_STATUSES
 
     def _require_claimed(self, listing_id):
         row = self.connection.execute(
@@ -483,59 +472,3 @@ class StateStore:
 
 def search_key(search_url):
     return hashlib.sha256(search_url.encode("utf-8")).hexdigest()
-
-
-def load_seen(path):
-    if not os.path.exists(path):
-        return SeenState()
-    with open(path, encoding="utf-8") as f:
-        data = json.load(f)
-
-    if not isinstance(data, dict) or data.get("version") != 1:
-        raise ValueError("seen state has an unsupported format")
-
-    listing_ids = data.get("listing_ids")
-    initialized_searches = data.get("initialized_searches")
-    if not isinstance(listing_ids, list) or not isinstance(
-        initialized_searches, list
-    ):
-        raise ValueError("seen state is malformed")
-    if any(not isinstance(value, str) for value in listing_ids):
-        raise ValueError("seen state listing IDs must be strings")
-    if any(not isinstance(value, str) for value in initialized_searches):
-        raise ValueError("seen state search keys must be strings")
-
-    return SeenState(set(listing_ids), set(initialized_searches))
-
-
-def save_seen(path, state):
-    directory = os.path.dirname(os.path.abspath(path))
-    basename = os.path.basename(path)
-    fd, temporary_path = tempfile.mkstemp(
-        dir=directory,
-        prefix=f".{basename}.",
-        text=True,
-    )
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(
-                {
-                    "version": 1,
-                    "listing_ids": sorted(state.listing_ids),
-                    "initialized_searches": sorted(
-                        state.initialized_searches
-                    ),
-                },
-                f,
-                indent=2,
-            )
-            f.write("\n")
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(temporary_path, path)
-    except BaseException:
-        try:
-            os.unlink(temporary_path)
-        except FileNotFoundError:
-            pass
-        raise
