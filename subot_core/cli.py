@@ -13,6 +13,7 @@ from .config import (
     poll_interval_bounds,
     url_origin,
 )
+from .logging_config import configure_logging
 from .runner import (
     log_summary,
     run_poller_process,
@@ -29,16 +30,6 @@ BASE_DIR = os.path.dirname(PACKAGE_DIR)
 CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
 STATE_PATH = os.path.join(BASE_DIR, "state.sqlite3")
 LOGGER = logging.getLogger("subot")
-
-
-def configure_logging():
-    """Configure the application's standard logging format."""
-
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s %(message)s",
-        datefmt="%Y-%m-%dT%H:%M:%S%z",
-    )
 
 
 def log_startup_config(cfg, dry_run, once):
