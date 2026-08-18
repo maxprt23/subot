@@ -80,3 +80,24 @@ class OpenRouterSettingsTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "llm_web_fetch_max_uses"):
             config.get_openrouter_settings(self.cfg)
+
+
+class LlmEnabledTests(unittest.TestCase):
+    def test_defaults_to_enabled(self):
+        self.assertTrue(config.llm_enabled({}))
+
+    def test_accepts_disabled_mode(self):
+        self.assertFalse(config.llm_enabled({"use_llm": False}))
+
+    def test_rejects_non_boolean_setting(self):
+        with self.assertRaisesRegex(ValueError, "use_llm must be a boolean"):
+            config.llm_enabled({"use_llm": "false"})
+
+
+class RetryLimitTests(unittest.TestCase):
+    def test_defaults_to_three_when_llm_is_disabled(self):
+        self.assertEqual(config.get_retry_limit({}, default=3), 3)
+
+    def test_rejects_malformed_optional_retry_limit(self):
+        with self.assertRaisesRegex(ValueError, "llm_max_retries must be an integer"):
+            config.get_retry_limit({"llm_max_retries": "three"}, default=3)

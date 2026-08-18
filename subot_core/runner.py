@@ -17,6 +17,8 @@ from curl_cffi.requests.exceptions import RequestException
 
 from .config import (
     get_openrouter_settings,
+    get_retry_limit,
+    llm_enabled,
     next_sleep,
     poll_interval_bounds,
     url_origin,
@@ -225,7 +227,7 @@ def process_claimed_job(cfg, store, client, job):
     """Decide and deliver one claimed listing, preserving retryable failures."""
 
     try:
-        should_notify = client.decide(job.payload)
+        should_notify = not llm_enabled(cfg) or client.decide(job.payload)
         if should_notify:
             notify(cfg, job.payload)
             store.mark_notified(job.listing_id)
@@ -239,7 +241,7 @@ def process_claimed_job(cfg, store, client, job):
         store.fail_or_retry(
             job.listing_id,
             error_type,
-            max_retries=cfg["llm_max_retries"],
+            max_retries=get_retry_limit(cfg, default=3),
         )
         LOGGER.error(
             "listing processing failed id=%s error_type=%s",
@@ -250,7 +252,7 @@ def process_claimed_job(cfg, store, client, job):
 
 
 def run_worker_process(stop_event, poller_done_event, once, cfg, state_path, dry_run):
-    """Child-process target that drains queued listings through OpenRouter."""
+    """Child-process target that drains queued listings and sends notifications."""
 
     _ignore_sigint_in_child()
     configure_logging()
@@ -259,7 +261,7 @@ def run_worker_process(stop_event, poller_done_event, once, cfg, state_path, dry
     with _worker_state_lock(state_path):
         with StateStore(state_path) as store:
             store.recover_claimed_jobs()
-            client = openrouter_client_from_config(cfg)
+            client = openrouter_client_from_config(cfg) if llm_enabled(cfg) else None
             while not stop_event.is_set():
                 job = store.claim_next()
                 if job is None:

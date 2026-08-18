@@ -236,6 +236,32 @@ class WorkerTests(unittest.TestCase):
         notify.assert_not_called()
         store.mark_rejected.assert_called_once_with("1")
 
+    @patch("subot_core.runner.notify")
+    def test_disabled_llm_notifies_without_decision(self, notify):
+        store = unittest.mock.Mock()
+        client = unittest.mock.Mock()
+        cfg = {"use_llm": False, "llm_max_retries": 3}
+
+        self.assertTrue(runner.process_claimed_job(cfg, store, client, self.job))
+
+        client.decide.assert_not_called()
+        notify.assert_called_once_with(cfg, self.job.payload)
+        store.mark_notified.assert_called_once_with("1")
+        store.mark_rejected.assert_not_called()
+
+    @patch("subot_core.runner.notify")
+    def test_disabled_llm_uses_default_retry_limit_without_llm_settings(self, notify):
+        store = unittest.mock.Mock()
+        notify.side_effect = RequestException("unavailable")
+
+        self.assertFalse(
+            runner.process_claimed_job({"use_llm": False}, store, None, self.job)
+        )
+
+        store.fail_or_retry.assert_called_once_with(
+            "1", "RequestException", max_retries=3
+        )
+
     def test_invalid_decision_is_requeued_with_the_configured_retry_limit(self):
         store = unittest.mock.Mock()
         client = unittest.mock.Mock()
@@ -356,6 +382,31 @@ class ChildProcessLoggingTests(unittest.TestCase):
         ignore_sigint.assert_called_once_with()
         configure_logging.assert_called_once_with()
         client_from_config.assert_called_once()
+
+    @patch("subot_core.runner.openrouter_client_from_config")
+    @patch("subot_core.runner.StateStore")
+    def test_worker_does_not_create_openrouter_client_when_llm_is_disabled(
+        self, state_store, client_from_config
+    ):
+        stop_event = unittest.mock.Mock()
+        stop_event.is_set.return_value = False
+        poller_done_event = unittest.mock.Mock()
+        poller_done_event.is_set.return_value = True
+        store = state_store.return_value.__enter__.return_value
+        store.claim_next.return_value = None
+        store.all_terminal.return_value = True
+
+        with tempfile.TemporaryDirectory() as directory:
+            runner.run_worker_process(
+                stop_event,
+                poller_done_event,
+                True,
+                {"use_llm": False},
+                os.path.join(directory, "state.sqlite3"),
+                False,
+            )
+
+        client_from_config.assert_not_called()
 
 
 class MultipleSearchTests(unittest.TestCase):

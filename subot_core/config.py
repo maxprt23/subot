@@ -50,6 +50,28 @@ def load_config(path):
         return json.load(f)
 
 
+def llm_enabled(cfg):
+    """Return whether listings require an LLM decision before notification."""
+
+    value = cfg.get("use_llm", True)
+    if not isinstance(value, bool):
+        raise ValueError("use_llm must be a boolean")
+    return value
+
+
+def get_retry_limit(cfg, default=None):
+    """Return a validated processing retry limit."""
+
+    value = cfg.get("llm_max_retries", default)
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError("llm_max_retries must be an integer")
+    if value < 0:
+        raise ValueError("llm_max_retries must not be negative")
+    if value > 3:
+        raise ValueError("llm_max_retries must not exceed 3")
+    return value
+
+
 def get_openrouter_settings(cfg):
     """Return validated OpenRouter and LLM decision settings."""
 
@@ -61,15 +83,13 @@ def get_openrouter_settings(cfg):
         settings[name] = value
 
     for name in OPENROUTER_INTEGER_SETTINGS:
+        if name == "llm_max_retries":
+            settings[name] = get_retry_limit(cfg)
+            continue
         value = cfg.get(name)
         if isinstance(value, bool) or not isinstance(value, int):
             raise ValueError(f"{name} must be an integer")
-        if name == "llm_max_retries":
-            if value < 0:
-                raise ValueError("llm_max_retries must not be negative")
-            if value > 3:
-                raise ValueError("llm_max_retries must not exceed 3")
-        elif value < 1:
+        if value < 1:
             raise ValueError(f"{name} must be positive")
         settings[name] = value
 

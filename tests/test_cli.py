@@ -113,6 +113,48 @@ class MainTests(unittest.TestCase):
         self.assertTrue(run_supervisor.call_args.kwargs["once"])
         self.assertIsNotNone(run_supervisor.call_args.kwargs["worker_done"])
 
+    @patch("subot_core.cli.get_openrouter_settings")
+    @patch("subot_core.cli.run_supervisor", return_value=0)
+    @patch("subot_core.cli.load_config", return_value=None)
+    def test_disabled_llm_does_not_validate_openrouter_settings(
+        self, load_config, run_supervisor, get_openrouter_settings
+    ):
+        load_config.return_value = {
+            "search_urls": ["https://example.test/one"],
+            "poll_interval_min": 300,
+            "poll_interval_max": 300,
+            "ntfy_server": "https://ntfy.example",
+            "ntfy_topic": "topic",
+            "use_llm": False,
+        }
+
+        with patch("sys.argv", ["subot.py", "--once"]):
+            self.assertEqual(cli.main(), 0)
+
+        get_openrouter_settings.assert_not_called()
+        run_supervisor.assert_called_once()
+
+    @patch("subot_core.cli.run_supervisor")
+    @patch("subot_core.cli.load_config", return_value=None)
+    def test_disabled_llm_rejects_malformed_optional_retry_limit(
+        self, load_config, run_supervisor
+    ):
+        load_config.return_value = {
+            "search_urls": ["https://example.test/one"],
+            "poll_interval_min": 300,
+            "poll_interval_max": 300,
+            "ntfy_server": "https://ntfy.example",
+            "ntfy_topic": "topic",
+            "use_llm": False,
+            "llm_max_retries": "three",
+        }
+
+        with patch("sys.argv", ["subot.py", "--once"]):
+            with self.assertRaisesRegex(ValueError, "llm_max_retries"):
+                cli.main()
+
+        run_supervisor.assert_not_called()
+
     @patch("subot_core.cli.queue_is_successful", return_value=True)
     @patch("subot_core.cli.queue_failure_boundary", return_value=4)
     @patch("subot_core.cli.run_supervisor", return_value=0)
