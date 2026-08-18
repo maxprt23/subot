@@ -6,7 +6,8 @@ from unittest.mock import patch
 
 from curl_cffi.requests.exceptions import RequestException
 
-import subot
+from subot_core import cli, config, ntfy, runner, state, subito
+from subot_core.models import CycleStats, SeenState
 
 
 def raw_item(aid, price, subject="Listing"):
@@ -44,21 +45,21 @@ class ExtractItemsTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            subot.extract_items(html),
+            subito.extract_items(html),
             [original],
         )
 
     def test_missing_next_data_is_a_parse_error(self):
         with self.assertRaisesRegex(ValueError, "__NEXT_DATA__"):
-            subot.extract_items("<html></html>")
+            subito.extract_items("<html></html>")
 
 
 class FetchPageTests(unittest.TestCase):
-    @patch("subot.requests.get")
+    @patch("subot_core.subito.requests.get")
     def test_impersonates_chrome(self, get):
         get.return_value.text = "html"
 
-        self.assertEqual(subot.fetch_page("https://example.test/search"), "html")
+        self.assertEqual(subito.fetch_page("https://example.test/search"), "html")
 
         get.assert_called_once_with(
             "https://example.test/search",
@@ -70,7 +71,7 @@ class FetchPageTests(unittest.TestCase):
 
 
 class NotificationTests(unittest.TestCase):
-    @patch("subot.requests.post")
+    @patch("subot_core.ntfy.requests.post")
     def test_unicode_title_is_encoded_as_an_ascii_header(self, post):
         post.return_value.raise_for_status.return_value = None
         cfg = {"ntfy_server": "https://ntfy.example", "ntfy_topic": "topic"}
@@ -82,7 +83,7 @@ class NotificationTests(unittest.TestCase):
             "city": "",
         }
 
-        subot.notify(cfg, item)
+        ntfy.notify(cfg, item)
 
         title = post.call_args.kwargs["headers"]["Title"]
         self.assertTrue(title.startswith("=?utf-8?"))
@@ -97,7 +98,7 @@ class LoggingTests(unittest.TestCase):
         }
 
         with self.assertLogs("subot", level="INFO") as logs:
-            subot.log_startup_config(cfg, dry_run=False, once=False)
+            cli.log_startup_config(cfg, dry_run=False, once=False)
 
         self.assertIn("search_origins=invalid", "\n".join(logs.output))
 
@@ -114,7 +115,7 @@ class LoggingTests(unittest.TestCase):
         }
 
         with self.assertLogs("subot", level="INFO") as logs:
-            subot.log_startup_config(cfg, dry_run=False, once=False)
+            cli.log_startup_config(cfg, dry_run=False, once=False)
 
         output = "\n".join(logs.output)
         self.assertIn("search_origins=https://example.test", output)
@@ -122,9 +123,9 @@ class LoggingTests(unittest.TestCase):
         for secret in ("search-secret", "private", "server-secret", "private-token"):
             self.assertNotIn(secret, output)
 
-    @patch("subot.extract_items")
-    @patch("subot.fetch_page", return_value="html")
-    @patch("subot.notify")
+    @patch("subot_core.runner.extract_items")
+    @patch("subot_core.runner.fetch_page", return_value="html")
+    @patch("subot_core.runner.notify")
     def test_notification_error_does_not_log_sensitive_exception(self, notify, fetch, extract):
         extract.return_value = [raw_item("1", 200)]
         notify.side_effect = RequestException(
@@ -133,12 +134,12 @@ class LoggingTests(unittest.TestCase):
         cfg = {}
 
         with self.assertLogs("subot", level="ERROR") as logs:
-            subot.run_once(
+            runner.run_once(
                 cfg,
                 "https://example.test/search",
                 set(),
                 dry_run=False,
-                stats=subot.CycleStats(),
+                stats=CycleStats(),
             )
 
         output = "\n".join(logs.output)
@@ -150,9 +151,9 @@ class LoggingTests(unittest.TestCase):
 class SeenStateTests(unittest.TestCase):
     def test_missing_state_starts_with_no_initialized_searches(self):
         with tempfile.TemporaryDirectory() as directory:
-            state = subot.load_seen(os.path.join(directory, "seen.json"))
+            seen_state = state.load_seen(os.path.join(directory, "seen.json"))
 
-        self.assertEqual(state, subot.SeenState())
+        self.assertEqual(seen_state, SeenState())
 
     def test_non_object_state_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -161,16 +162,16 @@ class SeenStateTests(unittest.TestCase):
                 json.dump(["existing"], f)
 
             with self.assertRaisesRegex(ValueError, "unsupported format"):
-                subot.load_seen(path)
+                state.load_seen(path)
 
     def test_structured_state_round_trips(self):
         with tempfile.TemporaryDirectory() as directory:
             path = os.path.join(directory, "seen.json")
-            expected = subot.SeenState({"2", "1"}, {"search-key"})
+            expected = SeenState({"2", "1"}, {"search-key"})
 
-            subot.save_seen(path, expected)
+            state.save_seen(path, expected)
 
-            self.assertEqual(subot.load_seen(path), expected)
+            self.assertEqual(state.load_seen(path), expected)
 
     def test_failed_write_preserves_existing_state(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -178,10 +179,10 @@ class SeenStateTests(unittest.TestCase):
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(["existing"], f)
 
-            with patch("subot.json.dump", side_effect=OSError("disk full")):
+            with patch("subot_core.state.json.dump", side_effect=OSError("disk full")):
                 with self.assertRaisesRegex(OSError, "disk full"):
-                    subot.save_seen(
-                        path, subot.SeenState({"replacement"}, set())
+                    state.save_seen(
+                        path, SeenState({"replacement"}, set())
                     )
 
             with open(path, encoding="utf-8") as f:
@@ -194,9 +195,9 @@ class RunOnceTests(unittest.TestCase):
         self.cfg = {}
         self.search_url = "https://example.test/search"
 
-    @patch("subot.extract_items")
-    @patch("subot.fetch_page", return_value="html")
-    @patch("subot.notify")
+    @patch("subot_core.runner.extract_items")
+    @patch("subot_core.runner.fetch_page", return_value="html")
+    @patch("subot_core.runner.notify")
     def test_initialization_records_existing_items_without_notifying(
         self, notify, fetch, extract
     ):
@@ -205,9 +206,9 @@ class RunOnceTests(unittest.TestCase):
             raw_item("2", None),
         ]
         seen = set()
-        stats = subot.CycleStats()
+        stats = CycleStats()
 
-        subot.run_once(
+        runner.run_once(
             self.cfg,
             self.search_url,
             seen,
@@ -222,28 +223,28 @@ class RunOnceTests(unittest.TestCase):
         self.assertEqual(stats.notified, 0)
         notify.assert_not_called()
 
-    @patch("subot.extract_items")
-    @patch("subot.fetch_page", return_value="html")
-    @patch("subot.notify")
+    @patch("subot_core.runner.extract_items")
+    @patch("subot_core.runner.fetch_page", return_value="html")
+    @patch("subot_core.runner.notify")
     def test_dry_run_does_not_notify_or_mutate_seen(self, notify, fetch, extract):
         extract.return_value = [raw_item("1", 200), raw_item("2", 50)]
         seen = set()
 
-        subot.run_once(
+        runner.run_once(
             self.cfg,
             self.search_url,
             seen,
             dry_run=True,
-            stats=subot.CycleStats(),
+            stats=CycleStats(),
             initialize=True,
         )
 
         self.assertEqual(seen, set())
         notify.assert_not_called()
 
-    @patch("subot.extract_items")
-    @patch("subot.fetch_page", return_value="html")
-    @patch("subot.notify")
+    @patch("subot_core.runner.extract_items")
+    @patch("subot_core.runner.fetch_page", return_value="html")
+    @patch("subot_core.runner.notify")
     def test_only_successfully_delivered_matches_are_seen(self, notify, fetch, extract):
         extract.return_value = [
             raw_item("1", 200),
@@ -253,8 +254,8 @@ class RunOnceTests(unittest.TestCase):
         notify.side_effect = [RequestException("unavailable"), None]
         seen = set()
 
-        stats = subot.CycleStats()
-        subot.run_once(
+        stats = CycleStats()
+        runner.run_once(
             self.cfg, self.search_url, seen, dry_run=False, stats=stats
         )
 
@@ -267,22 +268,22 @@ class RunOnceTests(unittest.TestCase):
 
 
 class NextSleepTests(unittest.TestCase):
-    @patch("subot.random.randint", return_value=7)
+    @patch("subot_core.config.random.randint", return_value=7)
     def test_uses_configured_bounds(self, randint):
         cfg = {"poll_interval_min": 5, "poll_interval_max": 10}
 
-        self.assertEqual(subot.next_sleep(cfg), 7)
+        self.assertEqual(config.next_sleep(cfg), 7)
         randint.assert_called_once_with(5, 10)
 
     def test_rejects_inverted_bounds(self):
         cfg = {"poll_interval_min": 10, "poll_interval_max": 5}
         with self.assertRaisesRegex(ValueError, "must not exceed"):
-            subot.next_sleep(cfg)
+            config.next_sleep(cfg)
 
     def test_rejects_non_positive_bounds(self):
         cfg = {"poll_interval_min": 0, "poll_interval_max": 5}
         with self.assertRaisesRegex(ValueError, "must be positive"):
-            subot.next_sleep(cfg)
+            config.next_sleep(cfg)
 
 
 class MultipleSearchTests(unittest.TestCase):
@@ -297,18 +298,18 @@ class MultipleSearchTests(unittest.TestCase):
             "poll_interval_max": 10,
         }
 
-    @patch("subot.save_seen")
-    @patch("subot.run_search")
+    @patch("subot_core.runner.save_seen")
+    @patch("subot_core.runner.run_search")
     def test_continuous_mode_validates_intervals_before_first_search(
         self, run_search, save_seen
     ):
         self.cfg["poll_interval_min"] = 0
 
         with self.assertRaisesRegex(ValueError, "must be positive"):
-            subot.run_continuously(
+            runner.run_continuously(
                 self.cfg,
                 self.urls,
-                subot.SeenState(),
+                SeenState(),
                 False,
                 "/tmp/seen.json",
             )
@@ -316,16 +317,16 @@ class MultipleSearchTests(unittest.TestCase):
         run_search.assert_not_called()
         save_seen.assert_not_called()
 
-    @patch("subot.save_seen")
-    @patch("subot.notify")
-    @patch("subot.extract_items")
-    @patch("subot.fetch_page", return_value="html")
+    @patch("subot_core.runner.save_seen")
+    @patch("subot_core.runner.notify")
+    @patch("subot_core.runner.extract_items")
+    @patch("subot_core.runner.fetch_page", return_value="html")
     def test_once_shares_seen_across_overlapping_searches(
         self, fetch, extract, notify, save_seen
     ):
         saved_states = []
         save_seen.side_effect = lambda path, state: saved_states.append(
-            subot.SeenState(
+            SeenState(
                 set(state.listing_ids), set(state.initialized_searches)
             )
         )
@@ -333,28 +334,28 @@ class MultipleSearchTests(unittest.TestCase):
             [raw_item("1", 200)],
             [raw_item("1", 200), raw_item("2", 250)],
         ]
-        state = subot.SeenState(
-            initialized_searches={subot.search_key(url) for url in self.urls}
+        seen_state = SeenState(
+            initialized_searches={state.search_key(url) for url in self.urls}
         )
 
-        result = subot.run_all_once(
-            self.cfg, self.urls, state, False, "/tmp/seen.json"
+        result = runner.run_all_once(
+            self.cfg, self.urls, seen_state, False, "/tmp/seen.json"
         )
 
         self.assertEqual(result, 0)
         self.assertEqual(fetch.call_args_list[0].args, (self.urls[0],))
         self.assertEqual(fetch.call_args_list[1].args, (self.urls[1],))
         self.assertEqual(notify.call_count, 2)
-        self.assertEqual(state.listing_ids, {"1", "2"})
+        self.assertEqual(seen_state.listing_ids, {"1", "2"})
         self.assertEqual(
             [saved.listing_ids for saved in saved_states],
             [{"1"}, {"1", "2"}],
         )
 
-    @patch("subot.save_seen")
-    @patch("subot.notify")
-    @patch("subot.extract_items")
-    @patch("subot.fetch_page", return_value="html")
+    @patch("subot_core.runner.save_seen")
+    @patch("subot_core.runner.notify")
+    @patch("subot_core.runner.extract_items")
+    @patch("subot_core.runner.fetch_page", return_value="html")
     def test_first_run_baselines_every_search_without_notifications(
         self, fetch, extract, notify, save_seen
     ):
@@ -362,25 +363,25 @@ class MultipleSearchTests(unittest.TestCase):
             [raw_item("1", 200)],
             [raw_item("1", 200), raw_item("2", 250)],
         ]
-        state = subot.SeenState()
+        seen_state = SeenState()
 
-        result = subot.run_all_once(
-            self.cfg, self.urls, state, False, "/tmp/seen.json"
+        result = runner.run_all_once(
+            self.cfg, self.urls, seen_state, False, "/tmp/seen.json"
         )
 
         self.assertEqual(result, 0)
         notify.assert_not_called()
-        self.assertEqual(state.listing_ids, {"1", "2"})
+        self.assertEqual(seen_state.listing_ids, {"1", "2"})
         self.assertEqual(
-            state.initialized_searches,
-            {subot.search_key(url) for url in self.urls},
+            seen_state.initialized_searches,
+            {state.search_key(url) for url in self.urls},
         )
         self.assertEqual(save_seen.call_count, 2)
 
-    @patch("subot.save_seen")
-    @patch("subot.notify")
-    @patch("subot.extract_items")
-    @patch("subot.fetch_page", return_value="html")
+    @patch("subot_core.runner.save_seen")
+    @patch("subot_core.runner.notify")
+    @patch("subot_core.runner.extract_items")
+    @patch("subot_core.runner.fetch_page", return_value="html")
     def test_listing_after_baseline_is_notified(
         self, fetch, extract, notify, save_seen
     ):
@@ -388,33 +389,33 @@ class MultipleSearchTests(unittest.TestCase):
             [raw_item("1", 200)],
             [raw_item("1", 200), raw_item("2", 250)],
         ]
-        state = subot.SeenState()
+        seen_state = SeenState()
 
-        subot.run_all_once(
-            self.cfg, [self.urls[0]], state, False, "/tmp/seen.json"
+        runner.run_all_once(
+            self.cfg, [self.urls[0]], seen_state, False, "/tmp/seen.json"
         )
-        subot.run_all_once(
-            self.cfg, [self.urls[0]], state, False, "/tmp/seen.json"
+        runner.run_all_once(
+            self.cfg, [self.urls[0]], seen_state, False, "/tmp/seen.json"
         )
 
         self.assertEqual(notify.call_count, 1)
-        self.assertEqual(state.listing_ids, {"1", "2"})
+        self.assertEqual(seen_state.listing_ids, {"1", "2"})
 
-    @patch("subot.save_seen")
-    @patch("subot.run_search")
+    @patch("subot_core.runner.save_seen")
+    @patch("subot_core.runner.run_search")
     def test_once_checks_every_search_and_reports_any_failure(
         self, run_search, save_seen
     ):
         run_search.side_effect = [
-            subot.CycleStats(failures=1),
-            subot.CycleStats(fetched=2),
+            CycleStats(failures=1),
+            CycleStats(fetched=2),
         ]
 
-        state = subot.SeenState()
-        result = subot.run_all_once(
+        seen_state = SeenState()
+        result = runner.run_all_once(
             self.cfg,
             self.urls,
-            state,
+            seen_state,
             False,
             "/tmp/seen.json",
         )
@@ -430,31 +431,31 @@ class MultipleSearchTests(unittest.TestCase):
             [True, True],
         )
         self.assertNotIn(
-            subot.search_key(self.urls[0]), state.initialized_searches
+            state.search_key(self.urls[0]), seen_state.initialized_searches
         )
         self.assertIn(
-            subot.search_key(self.urls[1]), state.initialized_searches
+            state.search_key(self.urls[1]), seen_state.initialized_searches
         )
 
-    @patch("subot.time.sleep")
-    @patch("subot.time.monotonic", side_effect=[0, 0, 0, 0, 0, 0])
-    @patch("subot.next_sleep", side_effect=[100, 200])
-    @patch("subot.save_seen")
-    @patch("subot.run_search")
+    @patch("subot_core.runner.time.sleep")
+    @patch("subot_core.runner.time.monotonic", side_effect=[0, 0, 0, 0, 0, 0])
+    @patch("subot_core.runner.next_sleep", side_effect=[100, 200])
+    @patch("subot_core.runner.save_seen")
+    @patch("subot_core.runner.run_search")
     def test_initial_searches_run_immediately_before_rescheduled_search(
         self, run_search, save_seen, next_sleep, monotonic, sleep
     ):
         run_search.side_effect = [
-            subot.CycleStats(failures=1),
-            subot.CycleStats(),
+            CycleStats(failures=1),
+            CycleStats(),
             RuntimeError("stop test loop"),
         ]
 
         with self.assertRaisesRegex(RuntimeError, "stop test loop"):
-            subot.run_continuously(
+            runner.run_continuously(
                 self.cfg,
                 self.urls,
-                subot.SeenState(),
+                SeenState(),
                 True,
                 "/tmp/seen.json",
             )
@@ -465,16 +466,16 @@ class MultipleSearchTests(unittest.TestCase):
         )
         sleep.assert_called_once_with(100)
 
-    @patch("subot.save_seen", side_effect=[OSError("disk full"), None])
-    @patch("subot.run_search", return_value=subot.CycleStats())
+    @patch("subot_core.runner.save_seen", side_effect=[OSError("disk full"), None])
+    @patch("subot_core.runner.run_search", return_value=CycleStats())
     def test_once_returns_failure_when_persistence_fails(
         self, run_search, save_seen
     ):
         with self.assertLogs("subot", level="ERROR"):
-            result = subot.run_all_once(
+            result = runner.run_all_once(
                 self.cfg,
                 self.urls,
-                subot.SeenState(),
+                SeenState(),
                 False,
                 "/tmp/seen.json",
             )
@@ -485,21 +486,21 @@ class MultipleSearchTests(unittest.TestCase):
 
 
 class MainTests(unittest.TestCase):
-    @patch("subot.run_all_once", return_value=1)
+    @patch("subot_core.cli.run_all_once", return_value=1)
     @patch(
-        "subot.load_config",
+        "subot_core.cli.load_config",
         return_value={
             "search_urls": ["https://example.test/one", "https://example.test/two"],
             "poll_interval_min": 300,
             "poll_interval_max": 300,
         },
     )
-    @patch("subot.load_seen", return_value=subot.SeenState())
+    @patch("subot_core.cli.load_seen", return_value=SeenState())
     def test_once_delegates_all_urls_and_returns_failure(
         self, load_seen, load_config, run_all_once
     ):
         with patch("sys.argv", ["subot.py", "--once"]):
-            self.assertEqual(subot.main(), 1)
+            self.assertEqual(cli.main(), 1)
 
         self.assertEqual(
             run_all_once.call_args.args[1],
