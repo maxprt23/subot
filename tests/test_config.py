@@ -38,7 +38,24 @@ class OpenRouterSettingsTests(unittest.TestCase):
         }
 
     def test_returns_validated_openrouter_settings(self):
-        self.assertEqual(config.get_openrouter_settings(self.cfg), self.cfg)
+        self.assertEqual(
+            config.get_openrouter_settings(self.cfg),
+            {**self.cfg, "llm_reasoning_effort": None},
+        )
+
+    def test_accepts_configured_reasoning_effort(self):
+        self.cfg["llm_reasoning_effort"] = "high"
+
+        self.assertEqual(
+            config.get_openrouter_settings(self.cfg)["llm_reasoning_effort"],
+            "high",
+        )
+
+    def test_rejects_unknown_reasoning_effort(self):
+        self.cfg["llm_reasoning_effort"] = "very-high"
+
+        with self.assertRaisesRegex(ValueError, "llm_reasoning_effort"):
+            config.get_openrouter_settings(self.cfg)
 
     def test_requires_non_empty_model_id(self):
         self.cfg["openrouter_model"] = ""
