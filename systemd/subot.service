@@ -7,6 +7,7 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory=/absolute/path/to/subot
 ExecStart=/absolute/path/to/subot/.venv/bin/python /absolute/path/to/subot/subot.py
+KillMode=mixed
 Restart=on-failure
 RestartSec=30
 
