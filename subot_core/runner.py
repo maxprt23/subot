@@ -20,6 +20,7 @@ from .config import (
     poll_interval_bounds,
     url_origin,
 )
+from .logging_config import configure_logging
 from .models import CycleStats
 from .ntfy import fmt_price, notify
 from .openrouter import OpenRouterClient
@@ -142,6 +143,7 @@ def run_queued_search(cfg, search_url, search_number, search_count, store, dry_r
 def run_poller_process(stop_event, poller_done_event, once, cfg, search_urls, state_path, dry_run):
     """Child-process target that polls independently from LLM work."""
 
+    configure_logging()
     del poller_done_event
     with StateStore(state_path) as store:
         search_count = len(search_urls)
@@ -241,6 +243,7 @@ def process_claimed_job(cfg, store, client, job):
 def run_worker_process(stop_event, poller_done_event, once, cfg, state_path, dry_run):
     """Child-process target that drains queued listings through OpenRouter."""
 
+    configure_logging()
     if dry_run:
         return
     with _worker_state_lock(state_path):

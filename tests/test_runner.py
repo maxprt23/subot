@@ -295,6 +295,56 @@ class WorkerTests(unittest.TestCase):
         return None
 
 
+class ChildProcessLoggingTests(unittest.TestCase):
+    @patch("subot_core.runner.run_queued_search", return_value=CycleStats())
+    @patch("subot_core.runner.configure_logging")
+    def test_poller_configures_logging_in_its_child_process(
+        self, configure_logging, run_queued_search
+    ):
+        stop_event = unittest.mock.Mock()
+        stop_event.is_set.return_value = False
+        with tempfile.TemporaryDirectory() as directory:
+            runner.run_poller_process(
+                stop_event,
+                unittest.mock.Mock(),
+                True,
+                {},
+                ["https://example.test/search"],
+                os.path.join(directory, "state.sqlite3"),
+                False,
+            )
+
+        configure_logging.assert_called_once_with()
+        run_queued_search.assert_called_once()
+
+    @patch("subot_core.runner.openrouter_client_from_config")
+    @patch("subot_core.runner.StateStore")
+    @patch("subot_core.runner.configure_logging")
+    def test_worker_configures_logging_in_its_child_process(
+        self, configure_logging, state_store, client_from_config
+    ):
+        stop_event = unittest.mock.Mock()
+        stop_event.is_set.return_value = False
+        poller_done_event = unittest.mock.Mock()
+        poller_done_event.is_set.return_value = True
+        store = state_store.return_value.__enter__.return_value
+        store.claim_next.return_value = None
+        store.all_terminal.return_value = True
+
+        with tempfile.TemporaryDirectory() as directory:
+            runner.run_worker_process(
+                stop_event,
+                poller_done_event,
+                True,
+                {"llm_max_retries": 3},
+                os.path.join(directory, "state.sqlite3"),
+                False,
+            )
+
+        configure_logging.assert_called_once_with()
+        client_from_config.assert_called_once()
+
+
 class MultipleSearchTests(unittest.TestCase):
     def setUp(self):
         self.urls = [
