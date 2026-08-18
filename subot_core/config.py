@@ -16,6 +16,9 @@ OPENROUTER_INTEGER_SETTINGS = (
     "llm_web_fetch_max_uses",
     "llm_web_fetch_max_content_tokens",
 )
+REASONING_EFFORTS = frozenset(
+    ("none", "minimal", "low", "medium", "high", "xhigh", "max")
+)
 
 
 def url_origin(value):
@@ -80,6 +83,15 @@ def get_openrouter_settings(cfg):
             "llm_web_search_max_total_results must be at least "
             "llm_web_search_max_results"
         )
+
+    reasoning_effort = cfg.get("llm_reasoning_effort")
+    if reasoning_effort is not None:
+        if not isinstance(reasoning_effort, str) or reasoning_effort not in REASONING_EFFORTS:
+            allowed = ", ".join(sorted(REASONING_EFFORTS))
+            raise ValueError(
+                "llm_reasoning_effort must be null or one of: " f"{allowed}"
+            )
+    settings["llm_reasoning_effort"] = reasoning_effort
     return settings
 
 

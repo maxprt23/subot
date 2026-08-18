@@ -153,6 +153,13 @@ class OpenRouterClientTests(unittest.TestCase):
             {"type": "openrouter:web_fetch", "parameters": {}},
         ])
 
+    def test_reasoning_effort_is_sent_when_configured(self):
+        client = self.client(reasoning_effort="high")
+
+        payload = client.payload_for({"url": "https://example.test"})
+
+        self.assertEqual(payload["reasoning"], {"effort": "high"})
+
 
 if __name__ == "__main__":
     unittest.main()

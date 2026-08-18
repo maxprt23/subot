@@ -22,7 +22,11 @@ model receives the complete listing, including its Subito article URL, and can
 use OpenRouter web search and web fetch. It must return exactly `true` or
 `false`. The four `llm_web_*` values bound search results, fetches, and fetched
 content. `llm_max_retries` may be 0 through 3; a value of 3 means four total
-attempts for a failing listing.
+attempts for a failing listing. Set `llm_reasoning_effort` to `minimal`, `low`,
+`medium`, `high`, `xhigh`, or `max` to enable model reasoning at that effort;
+set it to `none` to explicitly disable reasoning. Omit the setting (or set it
+to `null`) to leave reasoning out of the request. The selected model must
+support reasoning. Do not use `none` with a model that requires reasoning.
 
 Create a virtual environment and install the dependencies:
 

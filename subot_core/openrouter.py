@@ -11,6 +11,9 @@ from curl_cffi import requests
 
 
 ENDPOINT = "https://openrouter.ai/api/v1/chat/completions"
+REASONING_EFFORTS = frozenset(
+    ("none", "minimal", "low", "medium", "high", "xhigh", "max")
+)
 
 
 class OpenRouterDecisionError(RuntimeError):
@@ -38,6 +41,7 @@ class OpenRouterClient:
         web_search_max_total_results=None,
         web_fetch_max_uses=None,
         web_fetch_max_content_tokens=None,
+        reasoning_effort=None,
         timeout=60.0,
         endpoint=ENDPOINT,
         model_id=None,
@@ -69,6 +73,7 @@ class OpenRouterClient:
         self.web_fetch_max_content_tokens = self._limit(
             "web_fetch_max_content_tokens", web_fetch_max_content_tokens
         )
+        self.reasoning_effort = self._reasoning_effort(reasoning_effort)
         self.timeout = timeout
         self.endpoint = endpoint
 
@@ -96,6 +101,15 @@ class OpenRouterClient:
             return None
         if isinstance(value, bool) or not isinstance(value, int) or value < 1:
             raise ValueError(f"{name} must be a positive integer or null")
+        return value
+
+    @staticmethod
+    def _reasoning_effort(value):
+        if value is None:
+            return None
+        if not isinstance(value, str) or value not in REASONING_EFFORTS:
+            allowed = ", ".join(sorted(REASONING_EFFORTS))
+            raise ValueError(f"reasoning_effort must be null or one of: {allowed}")
         return value
 
     def _tools(self):
@@ -152,7 +166,7 @@ class OpenRouterClient:
     def payload_for(self, listing):
         """Build the request payload for *listing* without making a request."""
 
-        return {
+        payload = {
             "model": self.model,
             "messages": [
                 {"role": "system", "content": self.system_prompt},
@@ -161,6 +175,9 @@ class OpenRouterClient:
             ],
             "tools": self._tools(),
         }
+        if self.reasoning_effort is not None:
+            payload["reasoning"] = {"effort": self.reasoning_effort}
+        return payload
 
     @staticmethod
     def _content_from_response(response):

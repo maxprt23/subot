@@ -217,6 +217,7 @@ def openrouter_client_from_config(cfg):
         web_fetch_max_content_tokens=settings[
             "llm_web_fetch_max_content_tokens"
         ],
+        reasoning_effort=settings["llm_reasoning_effort"],
     )
 
 
