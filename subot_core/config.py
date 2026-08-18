@@ -3,6 +3,21 @@ import random
 from urllib.parse import urlsplit
 
 
+OPENROUTER_STRING_SETTINGS = (
+    "openrouter_api_key",
+    "openrouter_model",
+    "llm_system_prompt",
+    "llm_rules",
+)
+OPENROUTER_INTEGER_SETTINGS = (
+    "llm_max_retries",
+    "llm_web_search_max_results",
+    "llm_web_search_max_total_results",
+    "llm_web_fetch_max_uses",
+    "llm_web_fetch_max_content_tokens",
+)
+
+
 def url_origin(value):
     try:
         parsed = urlsplit(value)
@@ -30,6 +45,42 @@ def get_search_urls(cfg):
 def load_config(path):
     with open(path, encoding="utf-8") as f:
         return json.load(f)
+
+
+def get_openrouter_settings(cfg):
+    """Return validated OpenRouter and LLM decision settings."""
+
+    settings = {}
+    for name in OPENROUTER_STRING_SETTINGS:
+        value = cfg.get(name)
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f"{name} must be a non-empty string")
+        settings[name] = value
+
+    for name in OPENROUTER_INTEGER_SETTINGS:
+        value = cfg.get(name)
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError(f"{name} must be an integer")
+        if name == "llm_max_retries":
+            if value < 0:
+                raise ValueError("llm_max_retries must not be negative")
+            if value > 3:
+                raise ValueError("llm_max_retries must not exceed 3")
+        elif value < 1:
+            raise ValueError(f"{name} must be positive")
+        settings[name] = value
+
+    if settings["llm_web_search_max_results"] > 25:
+        raise ValueError("llm_web_search_max_results must not exceed 25")
+    if (
+        settings["llm_web_search_max_total_results"]
+        < settings["llm_web_search_max_results"]
+    ):
+        raise ValueError(
+            "llm_web_search_max_total_results must be at least "
+            "llm_web_search_max_results"
+        )
+    return settings
 
 
 def poll_interval_bounds(cfg):
