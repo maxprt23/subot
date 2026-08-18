@@ -7,7 +7,9 @@ import time
 
 from .config import (
     get_openrouter_settings,
+    get_retry_limit,
     get_search_urls,
+    llm_enabled,
     load_config,
     next_sleep,
     poll_interval_bounds,
@@ -157,7 +159,10 @@ def main():
 
     # Validate in the parent before child processes are created.  This keeps
     # configuration errors deterministic and avoids logging sensitive values.
-    get_openrouter_settings(cfg)
+    if llm_enabled(cfg):
+        get_openrouter_settings(cfg)
+    else:
+        get_retry_limit(cfg, default=3)
     once_failure_boundary = queue_failure_boundary(STATE_PATH) if args.once else 0
     return run_supervisor(
         run_poller_process,
