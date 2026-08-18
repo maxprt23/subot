@@ -128,6 +128,13 @@ def open_dry_run_state(state_path):
     return StateStore(":memory:")
 
 
+def initialize_state(state_path):
+    """Initialize SQLite before the poller and worker open it concurrently."""
+
+    with StateStore(state_path):
+        pass
+
+
 def main():
     """Parse command-line options, load state, and start polling."""
 
@@ -163,6 +170,7 @@ def main():
         get_openrouter_settings(cfg)
     else:
         get_retry_limit(cfg, default=3)
+    initialize_state(STATE_PATH)
     once_failure_boundary = queue_failure_boundary(STATE_PATH) if args.once else 0
     return run_supervisor(
         run_poller_process,

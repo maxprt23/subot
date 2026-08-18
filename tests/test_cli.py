@@ -70,6 +70,11 @@ class LoggingTests(unittest.TestCase):
 
 class MainTests(unittest.TestCase):
     def setUp(self):
+        initialize_state_patcher = patch(
+            "subot_core.cli.initialize_state"
+        )
+        self.initialize_state = initialize_state_patcher.start()
+        self.addCleanup(initialize_state_patcher.stop)
         self.cfg = {
             "search_urls": [
                 "https://example.test/one",
@@ -89,6 +94,31 @@ class MainTests(unittest.TestCase):
             "llm_web_fetch_max_uses": 2,
             "llm_web_fetch_max_content_tokens": 4000,
         }
+
+    @patch("subot_core.cli.run_supervisor", return_value=0)
+    @patch("subot_core.cli.load_config", return_value=None)
+    def test_normal_startup_initializes_state_before_spawning_children(
+        self, load_config, run_supervisor
+    ):
+        load_config.return_value = self.cfg
+        calls = []
+        self.initialize_state.side_effect = lambda path: calls.append(
+            ("initialize", path)
+        )
+        run_supervisor.side_effect = lambda *args, **kwargs: calls.append(
+            ("supervisor", None)
+        ) or 0
+
+        with patch("sys.argv", ["subot.py"]):
+            self.assertEqual(cli.main(), 0)
+
+        self.assertEqual(
+            calls,
+            [
+                ("initialize", cli.STATE_PATH),
+                ("supervisor", None),
+            ],
+        )
 
     @patch("subot_core.cli.run_supervisor", return_value=1)
     @patch(
