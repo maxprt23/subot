@@ -21,3 +21,45 @@ class NextSleepTests(unittest.TestCase):
         cfg = {"poll_interval_min": 0, "poll_interval_max": 5}
         with self.assertRaisesRegex(ValueError, "must be positive"):
             config.next_sleep(cfg)
+
+
+class OpenRouterSettingsTests(unittest.TestCase):
+    def setUp(self):
+        self.cfg = {
+            "openrouter_api_key": "secret",
+            "openrouter_model": "provider/model",
+            "llm_system_prompt": "Decide whether to notify.",
+            "llm_rules": "Notify only for cameras.",
+            "llm_max_retries": 3,
+            "llm_web_search_max_results": 3,
+            "llm_web_search_max_total_results": 6,
+            "llm_web_fetch_max_uses": 2,
+            "llm_web_fetch_max_content_tokens": 4000,
+        }
+
+    def test_returns_validated_openrouter_settings(self):
+        self.assertEqual(config.get_openrouter_settings(self.cfg), self.cfg)
+
+    def test_requires_non_empty_model_id(self):
+        self.cfg["openrouter_model"] = ""
+
+        with self.assertRaisesRegex(ValueError, "openrouter_model"):
+            config.get_openrouter_settings(self.cfg)
+
+    def test_rejects_negative_retry_limit(self):
+        self.cfg["llm_max_retries"] = -1
+
+        with self.assertRaisesRegex(ValueError, "llm_max_retries"):
+            config.get_openrouter_settings(self.cfg)
+
+    def test_rejects_more_than_three_retries(self):
+        self.cfg["llm_max_retries"] = 4
+
+        with self.assertRaisesRegex(ValueError, "llm_max_retries"):
+            config.get_openrouter_settings(self.cfg)
+
+    def test_rejects_non_positive_tool_limits(self):
+        self.cfg["llm_web_fetch_max_uses"] = 0
+
+        with self.assertRaisesRegex(ValueError, "llm_web_fetch_max_uses"):
+            config.get_openrouter_settings(self.cfg)

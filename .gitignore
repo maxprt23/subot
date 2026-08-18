@@ -5,6 +5,9 @@ docs/DONE.md
 docs/OPERATIONS.md
 config.json
 seen.json
+state.sqlite3
+state.sqlite3-shm
+state.sqlite3-wal
 __pycache__/
 *.py[cod]
 .venv/

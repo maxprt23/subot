@@ -1,6 +1,7 @@
 # subot
 
-A Subito.it watcher that sends new listings matching a price range to ntfy.
+A Subito.it watcher that queues new listings, has OpenRouter decide whether
+they are relevant, and sends approved listings to ntfy.
 
 ## Setup
 
@@ -14,6 +15,14 @@ chmod 600 config.json
 Add one or more Subito result URLs to `search_urls`. Filters such as location and
 category are encoded in each URL's path; price and shipping filters appear in
 its query string, for example `?ps=100&pe=500&shp=true`.
+
+Set `openrouter_api_key` and `openrouter_model`, then write your decision
+instructions in the separate `llm_system_prompt` and `llm_rules` fields. The
+model receives the complete listing, including its Subito article URL, and can
+use OpenRouter web search and web fetch. It must return exactly `true` or
+`false`. The four `llm_web_*` values bound search results, fetches, and fetched
+content. `llm_max_retries` may be 0 through 3; a value of 3 means four total
+attempts for a failing listing.
 
 Create a virtual environment and install the dependencies:
 
@@ -34,6 +43,10 @@ Run the bot continuously:
 ```bash
 python subot.py
 ```
+
+This single command supervises independent poller and LLM-worker processes.
+The poller persists new listings to `state.sqlite3` before the worker calls
+OpenRouter, so slow searches or fetches never delay polling.
 
 ## Optional: user-level systemd service
 
