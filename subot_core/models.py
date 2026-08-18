@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
@@ -12,16 +12,6 @@ class JobStatus(str, Enum):
     NOTIFIED = "notified"
     REJECTED = "rejected"
     FAILED = "failed"
-
-
-TERMINAL_JOB_STATUSES = frozenset(
-    {
-        JobStatus.BASELINE,
-        JobStatus.NOTIFIED,
-        JobStatus.REJECTED,
-        JobStatus.FAILED,
-    }
-)
 
 
 @dataclass(frozen=True)
@@ -43,11 +33,4 @@ class CycleStats:
     fetched: int = 0
     baselined: int = 0
     matched: int = 0
-    notified: int = 0
     failures: int = 0
-
-
-@dataclass
-class SeenState:
-    listing_ids: set = field(default_factory=set)
-    initialized_searches: set = field(default_factory=set)

@@ -3,11 +3,8 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from curl_cffi.requests.exceptions import RequestException
-
 from subot_core import cli, runner
 from subot_core.models import CycleStats
-from tests.helpers import raw_item
 
 
 class LoggingTests(unittest.TestCase):
@@ -42,31 +39,6 @@ class LoggingTests(unittest.TestCase):
         self.assertIn("ntfy_origin=https://ntfy.example", output)
         for secret in ("search-secret", "private", "server-secret", "private-token"):
             self.assertNotIn(secret, output)
-
-    @patch("subot_core.runner.extract_items")
-    @patch("subot_core.runner.fetch_page", return_value="html")
-    @patch("subot_core.runner.notify")
-    def test_notification_error_does_not_log_sensitive_exception(self, notify, fetch, extract):
-        extract.return_value = [raw_item("1", 200)]
-        notify.side_effect = RequestException(
-            "https://ntfy.example/private-topic?token=private-token"
-        )
-        cfg = {}
-
-        with self.assertLogs("subot", level="ERROR") as logs:
-            runner.run_once(
-                cfg,
-                "https://example.test/search",
-                set(),
-                dry_run=False,
-                stats=CycleStats(),
-            )
-
-        output = "\n".join(logs.output)
-        self.assertIn("error_type=RequestException", output)
-        self.assertNotIn("private-topic", output)
-        self.assertNotIn("private-token", output)
-
 
 class MainTests(unittest.TestCase):
     def setUp(self):
@@ -224,7 +196,6 @@ class MainTests(unittest.TestCase):
 
         state_store.assert_called_once_with(cli.STATE_PATH, read_only=True)
         run_dry_run_once.assert_called_once_with(
-            load_config.return_value,
             load_config.return_value["search_urls"],
             store,
         )
@@ -250,7 +221,6 @@ class MainTests(unittest.TestCase):
 
         state_store.assert_called_once_with(":memory:")
         run_dry_run_once.assert_called_once_with(
-            load_config.return_value,
             load_config.return_value["search_urls"],
             store,
         )
@@ -353,15 +323,15 @@ class DryRunPollingTests(unittest.TestCase):
         store = object()
 
         self.assertEqual(
-            cli.run_dry_run_once(self.cfg, self.search_urls, store),
+            cli.run_dry_run_once(self.search_urls, store),
             1,
         )
 
         self.assertEqual(
             [call.args for call in run_queued_search.call_args_list],
             [
-                (self.cfg, self.search_urls[0], 1, 2, store, True),
-                (self.cfg, self.search_urls[1], 2, 2, store, True),
+                (self.search_urls[0], 1, 2, store, True),
+                (self.search_urls[1], 2, 2, store, True),
             ],
         )
         self.assertEqual(log_summary.call_count, 2)
@@ -375,7 +345,6 @@ class DryRunPollingTests(unittest.TestCase):
             cli.run_dry_run_continuously(self.cfg, self.search_urls, object())
 
         run_queued_search.assert_called_once_with(
-            self.cfg,
             self.search_urls[0],
             1,
             2,
