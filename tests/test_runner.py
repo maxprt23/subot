@@ -249,6 +249,38 @@ class WorkerTests(unittest.TestCase):
         return None
 
 
+class OpenRouterClientFromConfigTests(unittest.TestCase):
+    @patch(
+        "subot_core.runner.load_llm_prompts",
+        return_value=("System instructions.", "Notification rules."),
+    )
+    @patch("subot_core.runner.OpenRouterClient")
+    def test_loads_system_prompt_and_rules_from_tracked_files(
+        self, client_class, load_llm_prompts
+    ):
+        cfg = {
+            "openrouter_api_key": "secret",
+            "openrouter_model": "provider/model",
+            "llm_max_retries": 3,
+            "llm_web_search_max_results": 3,
+            "llm_web_search_max_total_results": 6,
+            "llm_web_fetch_max_uses": 2,
+            "llm_web_fetch_max_content_tokens": 4000,
+        }
+
+        runner.openrouter_client_from_config(cfg)
+
+        load_llm_prompts.assert_called_once_with()
+        self.assertEqual(
+            client_class.call_args.kwargs["system_prompt"],
+            "System instructions.",
+        )
+        self.assertEqual(
+            client_class.call_args.kwargs["rules"],
+            "Notification rules.",
+        )
+
+
 class ChildProcessLoggingTests(unittest.TestCase):
     @patch("subot_core.runner.run_queued_search", return_value=CycleStats())
     @patch("subot_core.runner.configure_logging")

@@ -58,8 +58,6 @@ class MainTests(unittest.TestCase):
             "ntfy_topic": "topic",
             "openrouter_api_key": "secret",
             "openrouter_model": "provider/model",
-            "llm_system_prompt": "Decide.",
-            "llm_rules": "Only useful listings.",
             "llm_max_retries": 3,
             "llm_web_search_max_results": 3,
             "llm_web_search_max_total_results": 6,

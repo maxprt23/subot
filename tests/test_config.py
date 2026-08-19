@@ -28,8 +28,6 @@ class OpenRouterSettingsTests(unittest.TestCase):
         self.cfg = {
             "openrouter_api_key": "secret",
             "openrouter_model": "provider/model",
-            "llm_system_prompt": "Decide whether to notify.",
-            "llm_rules": "Notify only for cameras.",
             "llm_max_retries": 3,
             "llm_web_search_max_results": 3,
             "llm_web_search_max_total_results": 6,

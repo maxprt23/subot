@@ -27,6 +27,7 @@ from .logging_config import configure_logging
 from .models import CycleStats
 from .ntfy import fmt_price, notify
 from .openrouter import OpenRouterClient
+from .prompts import load_llm_prompts
 from .state import StateStore, search_key
 from .subito import extract_items, fetch_page, parse_item
 
@@ -205,11 +206,12 @@ def openrouter_client_from_config(cfg):
     """Build the worker's OpenRouter client from validated configuration."""
 
     settings = get_openrouter_settings(cfg)
+    system_prompt, rules = load_llm_prompts()
     return OpenRouterClient(
         api_key=settings["openrouter_api_key"],
         model_id=settings["openrouter_model"],
-        system_prompt=settings["llm_system_prompt"],
-        rules=settings["llm_rules"],
+        system_prompt=system_prompt,
+        rules=rules,
         web_search_max_results=settings["llm_web_search_max_results"],
         web_search_max_total_results=settings[
             "llm_web_search_max_total_results"
