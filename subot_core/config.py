@@ -6,8 +6,6 @@ from urllib.parse import urlsplit
 OPENROUTER_STRING_SETTINGS = (
     "openrouter_api_key",
     "openrouter_model",
-    "llm_system_prompt",
-    "llm_rules",
 )
 OPENROUTER_INTEGER_SETTINGS = (
     "llm_max_retries",

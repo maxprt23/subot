@@ -16,6 +16,7 @@ from .config import (
     url_origin,
 )
 from .logging_config import configure_logging
+from .prompts import load_llm_prompts
 from .runner import (
     log_summary,
     run_poller_process,
@@ -166,6 +167,7 @@ def main():
     # configuration errors deterministic and avoids logging sensitive values.
     if llm_enabled(cfg):
         get_openrouter_settings(cfg)
+        load_llm_prompts()
     else:
         get_retry_limit(cfg, default=3)
     initialize_state(STATE_PATH)

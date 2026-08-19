@@ -12,6 +12,10 @@ cp config.example.json config.json
 chmod 600 config.json
 ```
 
+Edit [`prompts/rules.md`](prompts/rules.md) to set the listings you want to
+receive. [`prompts/system.md`](prompts/system.md) contains the fixed model
+behavior and safety policy.
+
 Create a virtual environment and install the dependencies:
 
 ```bash

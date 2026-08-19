@@ -62,9 +62,13 @@ class OpenRouterClientTests(unittest.TestCase):
                 "Notify only when the listing meets my criteria.",
             ],
         )
-        listing_message = payload["messages"][2]
-        self.assertIn("untrusted listing data", listing_message["content"])
-        self.assertIn(listing["url"], listing_message["content"])
+        self.assertEqual(payload["messages"][2], {
+            "role": "user",
+            "content": (
+                '{"id":"123","price":250,"subject":"Camera",'
+                '"url":"https://www.subito.it/annunci/123"}'
+            ),
+        })
         self.assertEqual(payload["tools"], [
             {
                 "type": "openrouter:web_search",
