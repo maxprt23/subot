@@ -12,9 +12,15 @@ cp config.example.json config.json
 chmod 600 config.json
 ```
 
-Edit [`prompts/rules.md`](prompts/rules.md) to set the listings you want to
-receive. [`prompts/system.md`](prompts/system.md) contains the fixed model
-behavior and safety policy.
+Create your local notification rules, then edit the new file to set the
+listings you want to receive:
+
+```bash
+cp prompts/rules.example.md prompts/rules.md
+```
+
+[`prompts/system.md`](prompts/system.md) contains the fixed model behavior and
+safety policy.
 
 Create a virtual environment and install the dependencies:
 

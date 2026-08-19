@@ -4,6 +4,7 @@ docs/TODO.md
 docs/DONE.md
 docs/OPERATIONS.md
 config.json
+prompts/rules.md
 state.sqlite3
 state.sqlite3-shm
 state.sqlite3-wal
