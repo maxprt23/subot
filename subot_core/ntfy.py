@@ -12,7 +12,10 @@ def encode_header(value):
     try:
         value.encode("ascii")
     except UnicodeEncodeError:
-        return Header(value, "utf-8").encode()
+        # Email header folding inserts a newline and is invalid in an HTTP
+        # header value.  The continuation's leading space remains to separate
+        # adjacent encoded words.
+        return Header(value, "utf-8").encode().replace("\r", "").replace("\n", "")
     return value
 
 

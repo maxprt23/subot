@@ -1,6 +1,7 @@
 # subot
 
-A Subito.it watcher that sends new listings matching a price range to ntfy.
+A Subito.it watcher that sends newly discovered listings to ntfy, optionally
+filtering them with an LLM.
 
 ## Setup
 
@@ -11,9 +12,15 @@ cp config.example.json config.json
 chmod 600 config.json
 ```
 
-Add one or more Subito result URLs to `search_urls`. Filters such as location and
-category are encoded in each URL's path; price and shipping filters appear in
-its query string, for example `?ps=100&pe=500&shp=true`.
+Create your local notification rules, then edit the new file to set the
+listings you want to receive:
+
+```bash
+cp prompts/rules.example.md prompts/rules.md
+```
+
+[`prompts/system.md`](prompts/system.md) contains the fixed model behavior and
+safety policy.
 
 Create a virtual environment and install the dependencies:
 
