@@ -3,9 +3,12 @@
 A marketplace watcher for Subito.it and Vinted.it that sends newly discovered
 listings to ntfy, optionally filtering them with an LLM.
 
-The `search_urls` list may contain existing Subito.it result URLs and Vinted.it
-catalog URLs. Vinted categories are not fixed in the bot: both
-`/catalog?search_text=...` and `/catalog/<category>...` URLs are supported.
+The `search_urls` list accepts Subito.it and Vinted.it search-result URLs. Copy
+the filtered URL directly from the marketplace.
+
+The first normal poll of each URL establishes a baseline, so listings already
+present are not notified. Set `use_llm` to `false` to notify every newly found
+listing without LLM filtering.
 
 ## Setup
 
