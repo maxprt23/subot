@@ -32,7 +32,7 @@ class OpenRouterClient:
         self,
         *,
         api_key,
-        model=None,
+        model_id=None,
         system_prompt,
         rules,
         web_search_max_results=5,
@@ -42,23 +42,16 @@ class OpenRouterClient:
         reasoning_effort=None,
         timeout=60.0,
         endpoint=ENDPOINT,
-        model_id=None,
     ):
-        # ``model_id`` is an explicit alias for configuration integrations;
-        # ``model`` remains convenient for callers mirroring the API payload.
-        if model is not None and model_id is not None and model != model_id:
-            raise ValueError("model and model_id must match when both are set")
-        selected_model = model if model is not None else model_id
-
         self._require_non_empty_string("api_key", api_key)
-        self._require_non_empty_string("model", selected_model)
+        self._require_non_empty_string("model_id", model_id)
         self._require_string("system_prompt", system_prompt)
         self._require_string("rules", rules)
         self._require_non_empty_string("endpoint", endpoint)
         self._require_positive_number("timeout", timeout)
 
         self.api_key = api_key
-        self.model = selected_model
+        self.model = model_id
         self.system_prompt = system_prompt
         self.rules = rules
         self.web_search_max_results = self._limit(

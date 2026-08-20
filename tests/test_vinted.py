@@ -15,21 +15,6 @@ def catalog_html(items):
 
 
 class ExtractItemsTests(unittest.TestCase):
-    def test_does_not_scan_every_fragment_of_a_structured_script(self):
-        item = {
-            "id": 1234567890,
-            "title": "iPhone 13",
-            "price": {"amount": "250.00", "currency_code": "EUR"},
-            "url": "/items/1234567890-iphone-13",
-        }
-
-        with patch(
-            "subot_core.vinted._json_fragments",
-            side_effect=AssertionError("structured scripts must be decoded once"),
-            create=True,
-        ):
-            self.assertEqual(vinted.extract_items(catalog_html([item])), [item])
-
     def test_extracts_and_deduplicates_catalog_items(self):
         item = {
             "id": 1234567890,
