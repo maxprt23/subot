@@ -42,7 +42,9 @@ class QueuedPollingTests(unittest.TestCase):
         )
 
         store.enqueue_listing.assert_called_once()
-        self.assertEqual(store.enqueue_listing.call_args.args[0]["id"], "1")
+        self.assertEqual(
+            store.enqueue_listing.call_args.args[0]["id"], "subito:1"
+        )
         self.assertEqual(stats.matched, 1)
 
     @patch("subot_core.subito.extract_items")
@@ -57,7 +59,9 @@ class QueuedPollingTests(unittest.TestCase):
         ]
         store = unittest.mock.Mock()
         store.is_search_initialized.return_value = True
-        store.is_listing_known.side_effect = lambda listing_id: listing_id == "1"
+        store.is_listing_known.side_effect = (
+            lambda listing_id: listing_id == "subito:1"
+        )
         stats = CycleStats()
 
         runner.poll_search_once(
@@ -66,7 +70,10 @@ class QueuedPollingTests(unittest.TestCase):
 
         self.assertEqual(stats.matched, 1)
         store.is_listing_known.assert_has_calls(
-            [unittest.mock.call("1"), unittest.mock.call("2")]
+            [
+                unittest.mock.call("subito:1"),
+                unittest.mock.call("subito:2"),
+            ]
         )
         store.enqueue_listing.assert_not_called()
         store.initialize_search.assert_not_called()
@@ -83,7 +90,9 @@ class QueuedPollingTests(unittest.TestCase):
         ]
         store = unittest.mock.Mock()
         store.is_search_initialized.return_value = False
-        store.is_listing_known.side_effect = lambda listing_id: listing_id == "1"
+        store.is_listing_known.side_effect = (
+            lambda listing_id: listing_id == "subito:1"
+        )
         stats = CycleStats()
 
         runner.poll_search_once(
@@ -92,7 +101,10 @@ class QueuedPollingTests(unittest.TestCase):
 
         self.assertEqual(stats.matched, 1)
         store.is_listing_known.assert_has_calls(
-            [unittest.mock.call("1"), unittest.mock.call("2")]
+            [
+                unittest.mock.call("subito:1"),
+                unittest.mock.call("subito:2"),
+            ]
         )
         store.initialize_search.assert_not_called()
         store.enqueue_listing.assert_not_called()

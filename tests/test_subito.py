@@ -54,3 +54,25 @@ class FetchPageTests(unittest.TestCase):
             impersonate="chrome",
         )
         get.return_value.raise_for_status.assert_called_once_with()
+
+
+class ParseItemTests(unittest.TestCase):
+    def test_normalizes_subito_item_with_namespaced_id(self):
+        item = {
+            "urn": "urn:subito:item:list:123",
+            "subject": "iPhone 13",
+            "urls": {"default": "https://www.subito.it/listing-123.htm"},
+            "features": {"/price": {"values": [{"key": "200"}]}},
+        }
+
+        self.assertEqual(
+            subito.parse_item(item),
+            {
+                "id": "subito:123",
+                "subject": "iPhone 13",
+                "price": 200.0,
+                "url": "https://www.subito.it/listing-123.htm",
+                "town": "",
+                "city": "",
+            },
+        )

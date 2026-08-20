@@ -69,7 +69,7 @@ def parse_item(item):
         price = None
 
     return {
-        "id": aid,
+        "id": f"subito:{aid}",
         "subject": item.get("subject", ""),
         "price": price,
         "url": (item.get("urls") or {}).get("default", ""),
