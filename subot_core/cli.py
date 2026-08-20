@@ -22,6 +22,7 @@ from .runner import (
     run_poller_process,
     run_queued_search,
     run_worker_process,
+    source_for_url,
 )
 from .state import StateStore
 from .supervisor import run_supervisor
@@ -155,6 +156,8 @@ def main():
 
     cfg = load_config(CONFIG_PATH)
     search_urls = get_search_urls(cfg)
+    for search_url in search_urls:
+        source_for_url(search_url)
     log_startup_config(cfg, dry_run=args.dry_run, once=args.once)
 
     if args.dry_run:

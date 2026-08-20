@@ -1,5 +1,5 @@
 [Unit]
-Description=Subito.it listing watcher
+Description=Marketplace listing watcher
 After=network-online.target
 Wants=network-online.target
 

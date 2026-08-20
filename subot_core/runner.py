@@ -1,4 +1,4 @@
-"""Polling orchestration for the Subito watcher.
+"""Polling orchestration for marketplace watchers.
 
 The functions in this module contain the application's polling loop but keep
 configuration, persistence, fetching, and notification details in their own
@@ -10,6 +10,7 @@ import logging
 import signal
 import time
 from contextlib import contextmanager
+from urllib.parse import urlsplit
 
 import fcntl
 
@@ -29,11 +30,49 @@ from .ntfy import fmt_price, notify
 from .openrouter import OpenRouterClient
 from .prompts import load_llm_prompts
 from .state import StateStore, search_key
-from .subito import extract_items, fetch_page, parse_item
+from . import subito, vinted
 
 
 LOGGER = logging.getLogger("subot")
 WORKER_IDLE_SECONDS = 0.25
+_SUBITO_HOSTS = frozenset(("subito.it", "www.subito.it"))
+_VINTED_HOSTS = frozenset(("vinted.it", "www.vinted.it"))
+_UNSUPPORTED_URL_ERROR = (
+    "unsupported search URL; expected a Subito.it result URL or a "
+    "Vinted.it /catalog URL"
+)
+
+
+def source_for_url(search_url):
+    """Return the parser module for a supported search URL.
+
+    Subito result paths are intentionally left open because the existing
+    configuration supports multiple geographic and category URL layouts.
+    Vinted search pages are restricted to ``/catalog`` and descendants so a
+    profile, item, or other non-search page cannot be polled accidentally.
+    """
+
+    try:
+        parsed = urlsplit(search_url)
+        hostname = parsed.hostname
+        parsed.port  # Validate a malformed explicit port before any fetch.
+    except (AttributeError, TypeError, ValueError) as error:
+        raise ValueError(_UNSUPPORTED_URL_ERROR) from error
+
+    if parsed.scheme not in ("http", "https") or not hostname:
+        raise ValueError(_UNSUPPORTED_URL_ERROR)
+
+    hostname = hostname.rstrip(".").lower()
+    if hostname in _SUBITO_HOSTS:
+        return subito
+
+    path = parsed.path or ""
+    if hostname in _VINTED_HOSTS and (
+        path == "/catalog" or path.startswith("/catalog/")
+    ):
+        return vinted
+
+    raise ValueError(_UNSUPPORTED_URL_ERROR)
 
 
 def _ignore_sigint_in_child():
@@ -79,10 +118,11 @@ def poll_search_once(search_url, store, dry_run, stats):
     work for the independent worker process.
     """
 
-    html = fetch_page(search_url)
-    raw_items = extract_items(html)
+    source = source_for_url(search_url)
+    html = source.fetch_page(search_url)
+    raw_items = source.extract_items(html)
     stats.fetched = len(raw_items)
-    items = [item for raw in raw_items if (item := parse_item(raw))]
+    items = [item for raw in raw_items if (item := source.parse_item(raw))]
 
     key = search_key(search_url)
     if not store.is_search_initialized(key):

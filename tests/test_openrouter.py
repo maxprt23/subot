@@ -10,7 +10,7 @@ class OpenRouterClientTests(unittest.TestCase):
     def client(self, **overrides):
         settings = {
             "api_key": "secret-key",
-            "model": "provider/model",
+            "model_id": "provider/model",
             "system_prompt": "You are a careful listing filter.",
             "rules": "Notify only when the listing meets my criteria.",
             "web_search_max_results": 3,
@@ -20,6 +20,10 @@ class OpenRouterClientTests(unittest.TestCase):
         }
         settings.update(overrides)
         return OpenRouterClient(**settings)
+
+    def test_model_alias_is_not_supported(self):
+        with self.assertRaises(TypeError):
+            self.client(model="provider/model")
 
     @staticmethod
     def response(content):

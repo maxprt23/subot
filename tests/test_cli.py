@@ -49,8 +49,8 @@ class MainTests(unittest.TestCase):
         self.addCleanup(initialize_state_patcher.stop)
         self.cfg = {
             "search_urls": [
-                "https://example.test/one",
-                "https://example.test/two",
+                "https://www.subito.it/annunci-italia/vendita/usato/",
+                "https://www.vinted.it/catalog?search_text=phone",
             ],
             "poll_interval_min": 300,
             "poll_interval_max": 300,
@@ -64,6 +64,21 @@ class MainTests(unittest.TestCase):
             "llm_web_fetch_max_uses": 2,
             "llm_web_fetch_max_content_tokens": 4000,
         }
+
+    @patch("subot_core.cli.run_supervisor")
+    @patch("subot_core.cli.load_config", return_value=None)
+    def test_rejects_unsupported_search_url_before_state_or_workers(
+        self, load_config, run_supervisor
+    ):
+        self.cfg["search_urls"] = ["https://example.test/search"]
+        load_config.return_value = self.cfg
+
+        with patch("sys.argv", ["subot.py"]):
+            with self.assertRaisesRegex(ValueError, "unsupported search URL"):
+                cli.main()
+
+        self.initialize_state.assert_not_called()
+        run_supervisor.assert_not_called()
 
     @patch("subot_core.cli.run_supervisor", return_value=0)
     @patch("subot_core.cli.load_config", return_value=None)
@@ -120,7 +135,7 @@ class MainTests(unittest.TestCase):
         self, load_config, run_supervisor, get_openrouter_settings
     ):
         load_config.return_value = {
-            "search_urls": ["https://example.test/one"],
+            "search_urls": ["https://www.subito.it/annunci-italia/vendita/usato/"],
             "poll_interval_min": 300,
             "poll_interval_max": 300,
             "ntfy_server": "https://ntfy.example",
@@ -140,7 +155,7 @@ class MainTests(unittest.TestCase):
         self, load_config, run_supervisor
     ):
         load_config.return_value = {
-            "search_urls": ["https://example.test/one"],
+            "search_urls": ["https://www.subito.it/annunci-italia/vendita/usato/"],
             "poll_interval_min": 300,
             "poll_interval_max": 300,
             "ntfy_server": "https://ntfy.example",
@@ -180,7 +195,7 @@ class MainTests(unittest.TestCase):
         self, load_config, state_store, run_dry_run_once
     ):
         load_config.return_value = {
-            "search_urls": ["https://example.test/one"],
+            "search_urls": ["https://www.subito.it/annunci-italia/vendita/usato/"],
             "poll_interval_min": 300,
             "poll_interval_max": 300,
             "ntfy_server": "https://ntfy.example",
@@ -205,7 +220,7 @@ class MainTests(unittest.TestCase):
         self, load_config, state_store, run_dry_run_once
     ):
         load_config.return_value = {
-            "search_urls": ["https://example.test/one"],
+            "search_urls": ["https://www.subito.it/annunci-italia/vendita/usato/"],
             "poll_interval_min": 300,
             "poll_interval_max": 300,
             "ntfy_server": "https://ntfy.example",
@@ -230,7 +245,7 @@ class MainTests(unittest.TestCase):
         self, load_config, state_store, run_dry_run_continuously
     ):
         load_config.return_value = {
-            "search_urls": ["https://example.test/one"],
+            "search_urls": ["https://www.subito.it/annunci-italia/vendita/usato/"],
             "poll_interval_min": 300,
             "poll_interval_max": 300,
             "ntfy_server": "https://ntfy.example",
@@ -255,7 +270,7 @@ class MainTests(unittest.TestCase):
         self, load_config, run_dry_run_once
     ):
         load_config.return_value = {
-            "search_urls": ["https://example.test/one"],
+            "search_urls": ["https://www.subito.it/annunci-italia/vendita/usato/"],
             "poll_interval_min": 300,
             "poll_interval_max": 300,
             "ntfy_server": "https://ntfy.example",

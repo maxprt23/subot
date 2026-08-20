@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from curl_cffi.requests.exceptions import RequestException
 
-from subot_core import runner
+from subot_core import runner, subito, vinted
 from subot_core.models import CycleStats, JobStatus, ListingJob
 from subot_core.openrouter import OpenRouterDecisionError
 from tests.helpers import raw_item
@@ -23,10 +23,10 @@ class ChildSignalHandlingTests(unittest.TestCase):
 
 class QueuedPollingTests(unittest.TestCase):
     def setUp(self):
-        self.search_url = "https://example.test/search"
+        self.search_url = "https://www.subito.it/annunci-italia/vendita/usato/"
 
-    @patch("subot_core.runner.extract_items")
-    @patch("subot_core.runner.fetch_page", return_value="html")
+    @patch("subot_core.subito.extract_items")
+    @patch("subot_core.subito.fetch_page", return_value="html")
     def test_later_poll_queues_new_priced_listing_without_notifying(
         self, fetch, extract
     ):
@@ -42,11 +42,13 @@ class QueuedPollingTests(unittest.TestCase):
         )
 
         store.enqueue_listing.assert_called_once()
-        self.assertEqual(store.enqueue_listing.call_args.args[0]["id"], "1")
+        self.assertEqual(
+            store.enqueue_listing.call_args.args[0]["id"], "subito:1"
+        )
         self.assertEqual(stats.matched, 1)
 
-    @patch("subot_core.runner.extract_items")
-    @patch("subot_core.runner.fetch_page", return_value="html")
+    @patch("subot_core.subito.extract_items")
+    @patch("subot_core.subito.fetch_page", return_value="html")
     def test_dry_run_counts_only_unseen_priced_listings_without_mutating_store(
         self, fetch, extract
     ):
@@ -57,7 +59,9 @@ class QueuedPollingTests(unittest.TestCase):
         ]
         store = unittest.mock.Mock()
         store.is_search_initialized.return_value = True
-        store.is_listing_known.side_effect = lambda listing_id: listing_id == "1"
+        store.is_listing_known.side_effect = (
+            lambda listing_id: listing_id == "subito:1"
+        )
         stats = CycleStats()
 
         runner.poll_search_once(
@@ -66,13 +70,16 @@ class QueuedPollingTests(unittest.TestCase):
 
         self.assertEqual(stats.matched, 1)
         store.is_listing_known.assert_has_calls(
-            [unittest.mock.call("1"), unittest.mock.call("2")]
+            [
+                unittest.mock.call("subito:1"),
+                unittest.mock.call("subito:2"),
+            ]
         )
         store.enqueue_listing.assert_not_called()
         store.initialize_search.assert_not_called()
 
-    @patch("subot_core.runner.extract_items")
-    @patch("subot_core.runner.fetch_page", return_value="html")
+    @patch("subot_core.subito.extract_items")
+    @patch("subot_core.subito.fetch_page", return_value="html")
     def test_uninitialized_dry_run_excludes_globally_known_priced_listings(
         self, fetch, extract
     ):
@@ -83,7 +90,9 @@ class QueuedPollingTests(unittest.TestCase):
         ]
         store = unittest.mock.Mock()
         store.is_search_initialized.return_value = False
-        store.is_listing_known.side_effect = lambda listing_id: listing_id == "1"
+        store.is_listing_known.side_effect = (
+            lambda listing_id: listing_id == "subito:1"
+        )
         stats = CycleStats()
 
         runner.poll_search_once(
@@ -92,13 +101,16 @@ class QueuedPollingTests(unittest.TestCase):
 
         self.assertEqual(stats.matched, 1)
         store.is_listing_known.assert_has_calls(
-            [unittest.mock.call("1"), unittest.mock.call("2")]
+            [
+                unittest.mock.call("subito:1"),
+                unittest.mock.call("subito:2"),
+            ]
         )
         store.initialize_search.assert_not_called()
         store.enqueue_listing.assert_not_called()
 
-    @patch("subot_core.runner.extract_items")
-    @patch("subot_core.runner.fetch_page", return_value="html")
+    @patch("subot_core.subito.extract_items")
+    @patch("subot_core.subito.fetch_page", return_value="html")
     def test_first_poll_records_a_baseline_without_queueing(
         self, fetch, extract
     ):
@@ -115,6 +127,97 @@ class QueuedPollingTests(unittest.TestCase):
         store.initialize_search.assert_called_once()
         store.enqueue_listing.assert_not_called()
         self.assertEqual(stats.baselined, 2)
+
+
+class SourceRoutingTests(unittest.TestCase):
+    def test_routes_supported_subito_urls_to_the_subito_parser(self):
+        self.assertIs(
+            runner.source_for_url(
+                "https://www.subito.it/annunci-italia/vendita/usato/?q=iphone"
+            ),
+            subito,
+        )
+        self.assertIs(
+            runner.source_for_url("https://subito.it/qualsiasi-percorso"),
+            subito,
+        )
+
+    def test_routes_vinted_catalog_and_category_urls_to_vinted(self):
+        self.assertIs(
+            runner.source_for_url(
+                "https://www.vinted.it/catalog?search_text=iphone"
+            ),
+            vinted,
+        )
+        self.assertIs(
+            runner.source_for_url(
+                "https://vinted.it/catalog/123-elettronica?search_text=iphone"
+            ),
+            vinted,
+        )
+
+    def test_rejects_non_catalog_vinted_path_before_fetch(self):
+        with patch.object(vinted, "fetch_page") as fetch_page:
+            with self.assertRaisesRegex(ValueError, "unsupported search URL"):
+                runner.poll_search_once(
+                    "https://www.vinted.it/member/123",
+                    unittest.mock.Mock(),
+                    dry_run=True,
+                    stats=CycleStats(),
+                )
+
+        fetch_page.assert_not_called()
+
+    def test_rejects_unsupported_host_before_fetch(self):
+        with patch.object(subito, "fetch_page") as subito_fetch, patch.object(
+            vinted, "fetch_page"
+        ) as vinted_fetch:
+            with self.assertRaisesRegex(ValueError, "unsupported search URL"):
+                runner.poll_search_once(
+                    "https://example.test/search",
+                    unittest.mock.Mock(),
+                    dry_run=True,
+                    stats=CycleStats(),
+                )
+
+        subito_fetch.assert_not_called()
+        vinted_fetch.assert_not_called()
+
+    @patch("subot_core.vinted.parse_item")
+    @patch("subot_core.vinted.extract_items")
+    @patch("subot_core.vinted.fetch_page", return_value="html")
+    def test_poll_uses_vinted_parser_for_catalog_url(
+        self, fetch_page, extract_items, parse_item
+    ):
+        raw = object()
+        item = {
+            "id": "vinted:1",
+            "subject": "iPhone",
+            "price": 200,
+            "url": "https://www.vinted.it/items/1",
+            "town": "",
+            "city": "",
+        }
+        extract_items.return_value = [raw]
+        parse_item.return_value = item
+        store = unittest.mock.Mock()
+        store.is_search_initialized.return_value = True
+        store.enqueue_listing.return_value = True
+        stats = CycleStats()
+
+        runner.poll_search_once(
+            "https://www.vinted.it/catalog?search_text=iphone",
+            store,
+            dry_run=False,
+            stats=stats,
+        )
+
+        fetch_page.assert_called_once_with(
+            "https://www.vinted.it/catalog?search_text=iphone"
+        )
+        extract_items.assert_called_once_with("html")
+        parse_item.assert_called_once_with(raw)
+        store.enqueue_listing.assert_called_once_with(item)
 
 
 class WorkerTests(unittest.TestCase):
