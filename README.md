@@ -1,7 +1,11 @@
 # subot
 
-A Subito.it watcher that sends newly discovered listings to ntfy, optionally
-filtering them with an LLM.
+A marketplace watcher for Subito.it and Vinted.it that sends newly discovered
+listings to ntfy, optionally filtering them with an LLM.
+
+The `search_urls` list may contain existing Subito.it result URLs and Vinted.it
+catalog URLs. Vinted categories are not fixed in the bot: both
+`/catalog?search_text=...` and `/catalog/<category>...` URLs are supported.
 
 ## Setup
 
