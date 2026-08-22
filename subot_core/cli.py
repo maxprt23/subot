@@ -7,6 +7,7 @@ import time
 
 from .config import (
     get_openrouter_settings,
+    get_notification_channels,
     get_retry_limit,
     get_search_urls,
     llm_enabled,
@@ -14,6 +15,7 @@ from .config import (
     next_sleep,
     poll_interval_bounds,
     url_origin,
+    validate_notification_settings,
 )
 from .logging_config import configure_logging
 from .prompts import load_llm_prompts
@@ -41,10 +43,11 @@ def log_startup_config(cfg, dry_run, once):
 
     search_urls = get_search_urls(cfg)
     LOGGER.info(
-        "startup searches=%d search_origins=%s ntfy_origin=%s poll_interval_min=%s "
+        "startup searches=%d search_origins=%s notification_channels=%s ntfy_origin=%s poll_interval_min=%s "
         "poll_interval_max=%s dry_run=%s once=%s",
         len(search_urls),
         ",".join(sorted(set(url_origin(url) for url in search_urls))),
+        ",".join(get_notification_channels(cfg)),
         url_origin(cfg.get("ntfy_server", "")),
         cfg.get("poll_interval_min"),
         cfg.get("poll_interval_max"),
@@ -140,7 +143,7 @@ def main():
 
     configure_logging()
     parser = argparse.ArgumentParser(
-        description="Subito.it watcher with ntfy notifications"
+        description="Subito.it watcher with ntfy and Telegram notifications"
     )
     parser.add_argument(
         "--once",
@@ -168,6 +171,7 @@ def main():
 
     # Validate in the parent before child processes are created.  This keeps
     # configuration errors deterministic and avoids logging sensitive values.
+    validate_notification_settings(cfg)
     if llm_enabled(cfg):
         get_openrouter_settings(cfg)
         load_llm_prompts()

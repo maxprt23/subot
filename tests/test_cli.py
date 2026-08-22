@@ -170,6 +170,24 @@ class MainTests(unittest.TestCase):
 
         run_supervisor.assert_not_called()
 
+    @patch("subot_core.cli.run_supervisor")
+    @patch("subot_core.cli.load_config", return_value=None)
+    def test_rejects_no_selected_notification_channels_before_starting_workers(
+        self, load_config, run_supervisor
+    ):
+        self.cfg["notification_channels"] = []
+        load_config.return_value = self.cfg
+
+        with patch("sys.argv", ["subot.py"]):
+            with self.assertRaisesRegex(
+                ValueError,
+                "notification_channels must select at least one channel",
+            ):
+                cli.main()
+
+        self.initialize_state.assert_not_called()
+        run_supervisor.assert_not_called()
+
     @patch("subot_core.cli.queue_is_successful", return_value=True)
     @patch("subot_core.cli.queue_failure_boundary", return_value=4)
     @patch("subot_core.cli.run_supervisor", return_value=0)

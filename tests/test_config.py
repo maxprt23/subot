@@ -99,3 +99,54 @@ class RetryLimitTests(unittest.TestCase):
     def test_rejects_malformed_optional_retry_limit(self):
         with self.assertRaisesRegex(ValueError, "llm_max_retries must be an integer"):
             config.get_retry_limit({"llm_max_retries": "three"}, default=3)
+
+
+class NotificationChannelTests(unittest.TestCase):
+    def test_defaults_existing_configurations_to_ntfy(self):
+        self.assertEqual(
+            config.get_notification_channels({"ntfy_server": "x", "ntfy_topic": "y"}),
+            ("ntfy",),
+        )
+
+    def test_accepts_ntfy_and_telegram(self):
+        cfg = {
+            "notification_channels": ["telegram", "ntfy"],
+            "ntfy_server": "https://ntfy.example",
+            "ntfy_topic": "topic",
+            "telegram_bot_token": "bot-token",
+            "telegram_chat_id": "123",
+        }
+
+        self.assertEqual(
+            config.get_notification_channels(cfg), ("telegram", "ntfy")
+        )
+
+    def test_rejects_no_selected_notification_channels(self):
+        with self.assertRaisesRegex(
+            ValueError, "notification_channels must select at least one channel"
+        ):
+            config.get_notification_channels({"notification_channels": []})
+
+    def test_requires_new_configurations_to_select_a_channel(self):
+        with self.assertRaisesRegex(
+            ValueError, "notification_channels must select at least one channel"
+        ):
+            config.get_notification_channels({})
+
+    def test_requires_settings_for_selected_telegram_channel(self):
+        with self.assertRaisesRegex(ValueError, "telegram_chat_id"):
+            config.validate_notification_settings(
+                {
+                    "notification_channels": ["telegram"],
+                    "telegram_bot_token": "bot-token",
+                }
+            )
+
+    def test_accepts_numeric_telegram_chat_id(self):
+        cfg = {
+            "notification_channels": ["telegram"],
+            "telegram_bot_token": "bot-token",
+            "telegram_chat_id": -1001234567890,
+        }
+
+        self.assertEqual(config.validate_notification_settings(cfg), ("telegram",))
