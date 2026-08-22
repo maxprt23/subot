@@ -26,7 +26,8 @@ from .config import (
 )
 from .logging_config import configure_logging
 from .models import CycleStats
-from .ntfy import fmt_price, notify
+from .ntfy import fmt_price
+from .notifications import notify
 from .openrouter import OpenRouterClient
 from .prompts import load_llm_prompts
 from .state import StateStore, search_key

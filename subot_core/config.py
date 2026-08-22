@@ -17,6 +17,7 @@ OPENROUTER_INTEGER_SETTINGS = (
 REASONING_EFFORTS = frozenset(
     ("none", "minimal", "low", "medium", "high", "xhigh", "max")
 )
+NOTIFICATION_CHANNELS = frozenset(("ntfy", "telegram"))
 
 
 def url_origin(value):
@@ -55,6 +56,59 @@ def llm_enabled(cfg):
     if not isinstance(value, bool):
         raise ValueError("use_llm must be a boolean")
     return value
+
+
+def get_notification_channels(cfg):
+    """Return selected notification channels and preserve existing ntfy configs."""
+
+    if "notification_channels" not in cfg:
+        # Preserve existing ntfy configurations while requiring new
+        # configurations to choose a delivery channel explicitly.
+        channels = ["ntfy"] if "ntfy_server" in cfg or "ntfy_topic" in cfg else []
+    else:
+        channels = cfg["notification_channels"]
+    if not isinstance(channels, list) or not channels:
+        raise ValueError("notification_channels must select at least one channel")
+    if any(not isinstance(channel, str) for channel in channels):
+        raise ValueError("notification_channels entries must be strings")
+    if len(set(channels)) != len(channels):
+        raise ValueError("notification_channels must not contain duplicates")
+    unknown = set(channels) - NOTIFICATION_CHANNELS
+    if unknown:
+        allowed = ", ".join(sorted(NOTIFICATION_CHANNELS))
+        raise ValueError(
+            "notification_channels entries must be one of: " f"{allowed}"
+        )
+    return tuple(channels)
+
+
+def validate_notification_settings(cfg):
+    """Validate settings needed by every selected notification channel."""
+
+    channels = get_notification_channels(cfg)
+    required_settings = {
+        "ntfy": ("ntfy_server", "ntfy_topic"),
+        "telegram": ("telegram_bot_token", "telegram_chat_id"),
+    }
+    for channel in channels:
+        for name in required_settings[channel]:
+            value = cfg.get(name)
+            valid_chat_id = name == "telegram_chat_id" and (
+                isinstance(value, str) and value.strip()
+                or isinstance(value, int) and not isinstance(value, bool)
+            )
+            if valid_chat_id:
+                continue
+            if not isinstance(value, str) or not value.strip():
+                expected = (
+                    "an integer or non-empty string"
+                    if name == "telegram_chat_id"
+                    else "a non-empty string"
+                )
+                raise ValueError(
+                    f"{name} must be {expected} when {channel} is selected"
+                )
+    return channels
 
 
 def get_retry_limit(cfg, default=None):

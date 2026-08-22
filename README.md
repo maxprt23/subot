@@ -1,7 +1,7 @@
 # subot
 
 A marketplace watcher for Subito.it and Vinted.it that sends newly discovered
-listings to ntfy, optionally filtering them with an LLM.
+listings to ntfy, Telegram, or both, optionally filtering them with an LLM.
 
 The `search_urls` list accepts Subito.it and Vinted.it search-result URLs. Copy
 the filtered URL directly from the marketplace.
@@ -9,6 +9,11 @@ the filtered URL directly from the marketplace.
 The first normal poll of each URL establishes a baseline, so listings already
 present are not notified. Set `use_llm` to `false` to notify every newly found
 listing without LLM filtering.
+
+## Notifications
+
+In `config.json`, select `ntfy`, `telegram`, or both in
+`notification_channels`, then fill in the selected channel's settings.
 
 ## Setup
 
